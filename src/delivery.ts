@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3';
 import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
-import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
+import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
@@ -286,6 +286,29 @@ async function deliverMessage(
   if (msg.kind === 'system') {
     await handleSystemAction(content, session, inDb);
     return;
+  }
+
+  // Self-routing guardrail: an agent must never A2A-deliver to its own group.
+  // This is always a bug (typically: the agent picked the wrong target after
+  // a host restart replayed a backlog of mixed inbound sources). Redirect to
+  // the session's origin chat so the user actually receives the reply.
+  if (msg.channel_type === 'agent' && msg.platform_id === session.agent_group_id) {
+    const originMg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+    if (!originMg) {
+      throw new Error(
+        `agent ${session.agent_group_id} self-routed message ${msg.id} and session has no origin chat to redirect to`,
+      );
+    }
+    log.warn('Agent self-routing detected — redirecting to origin chat', {
+      messageId: msg.id,
+      sessionId: session.id,
+      agentGroupId: session.agent_group_id,
+      origin: `${originMg.channel_type}:${originMg.platform_id}`,
+    });
+    msg.channel_type = originMg.channel_type;
+    msg.platform_id = originMg.platform_id;
+    msg.thread_id = null;
+    // fall through to normal channel-delivery path
   }
 
   // Agent-to-agent — route to target session via the agent-to-agent module.

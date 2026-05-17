@@ -424,6 +424,33 @@ async function deliverToAgent(
       log.info('Admin command denied by gate', { command: gate.command, userId, agentGroupId: agent.agent_group_id });
       return;
     }
+    if (gate.action === 'handle') {
+      let cmdText: string;
+      try {
+        const parsed = JSON.parse(event.message.content) as { text?: string };
+        cmdText = (parsed.text ?? '').trim();
+      } catch {
+        cmdText = event.message.content.trim();
+      }
+      const spaceIdx = cmdText.indexOf(' ');
+      const cmdArgs = spaceIdx >= 0 ? cmdText.slice(spaceIdx + 1).trim() : '';
+      const { handleHostCommand } = await import('./modules/host-commands/index.js');
+      await handleHostCommand(
+        { command: gate.command, args: cmdArgs, event, session, userId, mg, agentGroup, deliveryAddr },
+        (responseText) => {
+          writeOutboundDirect(session.agent_group_id, session.id, {
+            id: 'hcmd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+            kind: 'chat',
+            platformId: deliveryAddr.platformId,
+            channelType: deliveryAddr.channelType,
+            threadId: deliveryAddr.threadId,
+            content: JSON.stringify({ text: responseText }),
+          });
+        },
+      );
+      log.info('Host command handled', { command: gate.command, agentGroupId: agent.agent_group_id });
+      return;
+    }
   }
 
   // Materialize inbound file attachments into the session workspace so the
@@ -482,6 +509,27 @@ async function deliverToAgent(
     } catch (err) {
       log.warn('Failed to write inbound file attachment', { err, agentGroup: agentGroup.folder });
     }
+  }
+
+  if (wake) {
+    const goalFile = path.join(GROUPS_DIR, agentGroup.folder, 'current-goal.txt');
+    try {
+      if (fs.existsSync(goalFile)) {
+        const goalText = fs.readFileSync(goalFile, 'utf-8').trim();
+        if (goalText) {
+          writeSessionMessage(session.agent_group_id, session.id, {
+            id: 'goal-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+            kind: 'chat',
+            timestamp: new Date().toISOString(),
+            platformId: deliveryAddr.platformId,
+            channelType: deliveryAddr.channelType,
+            threadId: deliveryAddr.threadId,
+            content: JSON.stringify({ text: '[Active goal] ' + goalText, sender: 'system', senderId: 'system' }),
+            trigger: 0,
+          });
+        }
+      }
+    } catch { /* best-effort */ }
   }
 
   writeSessionMessage(session.agent_group_id, session.id, {

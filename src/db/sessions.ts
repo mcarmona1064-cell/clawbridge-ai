@@ -225,3 +225,11 @@ export function getAskQuestionRender(
 
   return undefined;
 }
+
+export function getPendingApprovalsByDeliveryChannel(channelType: string, platformId: string): PendingApproval[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM pending_approvals WHERE channel_type = ? AND platform_id = ? AND status = 'pending' ORDER BY created_at DESC",
+    )
+    .all(channelType, platformId) as PendingApproval[];
+}

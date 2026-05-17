@@ -43,3 +43,17 @@ export function onShutdown(cb: ShutdownCallback): void {
 export function getShutdownCallbacks(): readonly ShutdownCallback[] {
   return shutdownCallbacks;
 }
+
+import { log } from './log.js';
+
+export async function dispatchResponse(payload: ResponsePayload): Promise<void> {
+  for (const handler of responseHandlers) {
+    try {
+      const claimed = await handler(payload);
+      if (claimed) return;
+    } catch (err) {
+      log.error('Response handler threw', { questionId: payload.questionId, err });
+    }
+  }
+  log.warn('Unclaimed response', { questionId: payload.questionId, value: payload.value });
+}

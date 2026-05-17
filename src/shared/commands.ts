@@ -1,9 +1,10 @@
-export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
+export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none' | 'host';
 
 export interface SlashCommandDefinition {
   command: string;
   category: Exclude<CommandCategory, 'none'>;
   description?: string;
+  adminOnly?: boolean;
 }
 
 const DEFINITIONS: SlashCommandDefinition[] = [
@@ -19,6 +20,15 @@ const DEFINITIONS: SlashCommandDefinition[] = [
   { command: '/context', category: 'admin' },
   { command: '/cost', category: 'admin' },
   { command: '/files', category: 'admin' },
+  // Host-handled commands (processed by the host process, not forwarded to container)
+  { command: '/approve', category: 'host', adminOnly: true, description: 'Approve a pending command or request' },
+  { command: '/deny', category: 'host', adminOnly: true, description: 'Deny a pending command or request' },
+  { command: '/stop', category: 'host', adminOnly: true, description: 'Stop the current agent session' },
+  { command: '/update', category: 'host', adminOnly: true, description: 'Check for ClawBridge updates' },
+  { command: '/status', category: 'host', adminOnly: false, description: 'Show current session status' },
+  { command: '/whoami', category: 'host', adminOnly: false, description: 'Show your user info and permissions' },
+  { command: '/commands', category: 'host', adminOnly: false, description: 'List available commands' },
+  { command: '/goal', category: 'host', adminOnly: false, description: 'Set or clear a persistent goal (/goal <target> or /goal clear)' },
 ];
 
 export const COMMAND_REGISTRY = Object.freeze(DEFINITIONS.map((def) => Object.freeze({ ...def })));

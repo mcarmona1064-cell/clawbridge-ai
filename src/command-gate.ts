@@ -7,10 +7,10 @@
  *   "Permission denied" response written directly to messages_out
  * - Normal messages: pass through unchanged
  */
-import { classifySlashCommand } from './shared/commands.js';
+import { classifySlashCommand, COMMAND_REGISTRY } from './shared/commands.js';
 import { getDb, hasTable } from './db/connection.js';
 
-export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string };
+export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string } | { action: 'handle'; command: string };
 
 /**
  * Classify a message and decide whether it should reach the container.
@@ -30,6 +30,15 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
   const classified = classifySlashCommand(text);
   if (classified.category === 'none' || classified.category === 'passthrough') return { action: 'pass' };
   if (classified.category === 'filtered') return { action: 'filter' };
+
+  if (classified.category === 'host') {
+    const def = COMMAND_REGISTRY.find((d) => d.command === classified.command);
+    const adminOnly = def?.adminOnly !== false;
+    if (adminOnly && !isAdmin(userId, agentGroupId)) {
+      return { action: 'deny', command: classified.command };
+    }
+    return { action: 'handle', command: classified.command };
+  }
 
   if (isAdmin(userId, agentGroupId)) {
     return { action: 'pass' };
