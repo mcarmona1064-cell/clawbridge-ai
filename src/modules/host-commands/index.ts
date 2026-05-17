@@ -218,7 +218,7 @@ async function handleUpdate(ctx: HostCommandContext, write: WriteResponse): Prom
     };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch('https://registry.npmjs.org/clawbridge-agent/latest', {
+    const res = await fetch('https://registry.npmjs.org/clawbridge-codex/latest', {
       signal: controller.signal,
     });
     clearTimeout(timeout);

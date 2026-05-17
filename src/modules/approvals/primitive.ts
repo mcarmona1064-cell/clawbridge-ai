@@ -203,6 +203,8 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<boo
     created_at: new Date().toISOString(),
     title,
     options_json: JSON.stringify(normalizedOptions),
+    channel_type: target.messagingGroup.channel_type,
+    platform_id: target.messagingGroup.platform_id,
   });
 
   const adapter = getDeliveryAdapter();
