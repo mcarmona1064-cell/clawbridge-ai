@@ -1,3 +1,4 @@
+import { classifySlashCommand, isCommand, type CommandCategory } from '../../../shared/commands.js';
 import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
 import { TIMEZONE, formatLocalTime } from './timezone.js';
@@ -9,11 +10,6 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
  * - passthrough: pass raw to the agent (no XML wrapping)
  * - none: not a command — format normally
  */
-export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
-
-const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files']);
-const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
-
 export interface CommandInfo {
   category: CommandCategory;
   command: string; // the command name (e.g., '/clear')
@@ -37,22 +33,8 @@ export function categorizeMessage(msg: MessageInRow): CommandInfo {
   const text = (content.text || '').trim();
   const senderId = extractSenderId(msg, content);
 
-  if (!text.startsWith('/')) {
-    return { category: 'none', command: '', text, senderId };
-  }
-
-  // Extract the command name (e.g., '/clear' from '/clear some args')
-  const command = text.split(/\s/)[0].toLowerCase();
-
-  if (ADMIN_COMMANDS.has(command)) {
-    return { category: 'admin', command, text, senderId };
-  }
-
-  if (FILTERED_COMMANDS.has(command)) {
-    return { category: 'filtered', command, text, senderId };
-  }
-
-  return { category: 'passthrough', command, text, senderId };
+  const classified = classifySlashCommand(text);
+  return { category: classified.category, command: classified.command, text, senderId };
 }
 
 /**
@@ -63,7 +45,7 @@ export function categorizeMessage(msg: MessageInRow): CommandInfo {
 export function isClearCommand(msg: MessageInRow): boolean {
   const content = parseContent(msg.content);
   const text = (content.text || '').trim();
-  return text.toLowerCase().startsWith('/clear');
+  return isCommand(text, '/clear');
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

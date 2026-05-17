@@ -17,7 +17,7 @@ import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
-import { getApprovalHandler } from './primitive.js';
+import { getApprovalHandler, getApprovalRejectionHandler } from './primitive.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   const approval = getPendingApproval(payload.questionId);
@@ -55,7 +55,24 @@ async function handleRegisteredApproval(
   };
 
   if (selectedOption !== 'approve') {
-    notify(`Your ${approval.action} request was rejected by admin.`);
+    const rejectionHandler = getApprovalRejectionHandler(approval.action);
+    if (rejectionHandler) {
+      const payload = JSON.parse(approval.payload);
+      try {
+        await rejectionHandler({ session, payload, userId, notify });
+      } catch (err) {
+        log.error('Approval rejection handler threw', {
+          approvalId: approval.approval_id,
+          action: approval.action,
+          err,
+        });
+        notify(
+          `Your ${approval.action} request was rejected, but applying the rejection failed: ${err instanceof Error ? err.message : String(err)}.`,
+        );
+      }
+    } else {
+      notify(`Your ${approval.action} request was rejected by admin.`);
+    }
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
     deletePendingApproval(approval.approval_id);
     await wakeContainer(session);

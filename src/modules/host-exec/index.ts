@@ -20,6 +20,8 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { getActiveSessions } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { sessionDir } from '../../session-manager.js';
+import type { Session } from '../../types.js';
+import { requestApproval, registerApprovalHandler, registerApprovalRejectionHandler } from '../approvals/index.js';
 
 const POLL_INTERVAL_MS = 250;
 
@@ -35,6 +37,36 @@ interface ExecResponse {
   stdout: string;
   stderr: string;
   error?: string;
+}
+
+interface HostExecApprovalPayload {
+  requestId: string;
+  command: string;
+  timeout: number;
+  cwd?: string;
+  responsePath: string;
+}
+
+const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
+  /(^|[;&|()\s])sudo(\s|$)/i,
+  /\brm\s+[^\n]*-(?:[^\n]*r[^\n]*f|[^\n]*f[^\n]*r)/i,
+  /\b(?:launchctl|systemctl)\b/i,
+  /\b(?:kill|pkill|killall)\b/i,
+  /\bdocker\s+(?:stop|rm|rmi|compose\s+down)\b/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+clean\b/i,
+  /\b(?:apt|apt-get|brew|npm|pnpm|yarn|pip|pip3)\s+(?:install|remove|uninstall|upgrade|update)\b/i,
+  /\bcurl\b[^\n]*(?:\||>)\s*(?:sh|bash|zsh)\b/i,
+  /\bwget\b[^\n]*(?:\||>)\s*(?:sh|bash|zsh)\b/i,
+];
+
+export function isDangerousHostExecCommand(command: string): boolean {
+  const trimmed = command.trim();
+  return DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+function deniedResponse(error: string): ExecResponse {
+  return { exitCode: 126, stdout: '', stderr: '', error };
 }
 
 const inflight = new Set<string>();
@@ -54,7 +86,7 @@ function runCommand(req: ExecRequest): Promise<ExecResponse> {
       (error, stdout, stderr) => {
         if (error) {
           // ChildProcess errors carry exit code on `code` and signal on `signal`.
-          const e = error as NodeJS.ErrnoException & { code?: number | string; signal?: string };
+          const e = error as unknown as NodeJS.ErrnoException & { code?: number | string; signal?: string };
           const exitCode = typeof e.code === 'number' ? e.code : 1;
           resolve({
             exitCode,
@@ -70,7 +102,112 @@ function runCommand(req: ExecRequest): Promise<ExecResponse> {
   });
 }
 
-async function processRequest(reqDir: string, resDir: string, filename: string, allowed: boolean): Promise<void> {
+function payloadString(payload: Record<string, unknown>, key: keyof HostExecApprovalPayload): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function payloadNumber(payload: Record<string, unknown>, key: keyof HostExecApprovalPayload): number | undefined {
+  const value = payload[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parseApprovalPayload(payload: Record<string, unknown>): HostExecApprovalPayload {
+  const requestId = payloadString(payload, 'requestId');
+  const command = payloadString(payload, 'command');
+  const responsePath = payloadString(payload, 'responsePath');
+  const timeout = payloadNumber(payload, 'timeout');
+  const cwd = payloadString(payload, 'cwd');
+  if (!requestId || !command || !responsePath || !timeout) {
+    throw new Error('host_exec approval payload is missing requestId, command, timeout, or responsePath');
+  }
+  return { requestId, command, responsePath, timeout, cwd };
+}
+
+async function writeHostExecApprovalResult(
+  payload: Record<string, unknown>,
+  response: ExecResponse,
+): Promise<HostExecApprovalPayload> {
+  const parsed = parseApprovalPayload(payload);
+  fs.mkdirSync(path.dirname(parsed.responsePath), { recursive: true });
+  writeAtomic(parsed.responsePath, JSON.stringify(response));
+  return parsed;
+}
+
+export async function applyApprovedHostExec({
+  payload,
+  notify,
+}: {
+  payload: Record<string, unknown>;
+  notify: (text: string) => void;
+}): Promise<void> {
+  const parsed = parseApprovalPayload(payload);
+  log.info('host_exec: approved command running', {
+    reqId: parsed.requestId,
+    command: parsed.command,
+    cwd: parsed.cwd,
+  });
+  const response = await runCommand({
+    id: parsed.requestId,
+    command: parsed.command,
+    timeout: parsed.timeout,
+    cwd: parsed.cwd,
+  });
+  await writeHostExecApprovalResult(payload, response);
+  notify(`host_exec command approved and executed: ${parsed.command}`);
+  log.info('host_exec: approved command completed', { reqId: parsed.requestId, exitCode: response.exitCode });
+}
+
+export async function rejectHostExec({
+  payload,
+  notify,
+}: {
+  payload: Record<string, unknown>;
+  notify: (text: string) => void;
+}): Promise<void> {
+  const parsed = await writeHostExecApprovalResult(
+    payload,
+    deniedResponse('host_exec command was rejected by admin approval.'),
+  );
+  notify(`host_exec command rejected: ${parsed.command}`);
+}
+
+async function requestHostExecApproval(session: Session, req: ExecRequest, resPath: string): Promise<boolean> {
+  return requestApproval({
+    session,
+    agentName: session.agent_group_id,
+    action: 'host_exec',
+    payload: {
+      requestId: req.id,
+      command: req.command,
+      timeout: req.timeout,
+      cwd: req.cwd,
+      responsePath: resPath,
+    },
+    title: 'Approve host terminal command?',
+    question: [
+      'A container agent requested a host terminal command that needs approval.',
+      '',
+      `Agent group: ${session.agent_group_id}`,
+      `Session: ${session.id}`,
+      `Working directory: ${req.cwd || homedir()}`,
+      `Timeout: ${req.timeout}ms`,
+      '',
+      'Command:',
+      '```',
+      req.command,
+      '```',
+    ].join('\n'),
+  });
+}
+
+async function processRequest(
+  session: Session,
+  reqDir: string,
+  resDir: string,
+  filename: string,
+  allowed: boolean,
+): Promise<void> {
   const reqPath = path.join(reqDir, filename);
   const inflightKey = reqPath;
   if (inflight.has(inflightKey)) return;
@@ -119,19 +256,32 @@ async function processRequest(reqDir: string, resDir: string, filename: string, 
 
     let response: ExecResponse;
     if (!allowed) {
-      response = {
-        exitCode: 126,
-        stdout: '',
-        stderr: '',
-        error: 'host_exec is not enabled for this agent group (allowHostExec is false in container.json).',
-      };
+      response = deniedResponse(
+        'host_exec is not enabled for this agent group (allowHostExec is false in container.json).',
+      );
       log.warn('host_exec: rejected — allowHostExec is false', { reqId: req.id });
-    } else {
-      log.info('host_exec: running', { reqId: req.id, command: req.command, cwd: req.cwd, timeout: req.timeout });
-      response = await runCommand(req);
-      log.info('host_exec: completed', { reqId: req.id, exitCode: response.exitCode });
+      writeAtomic(resPath, JSON.stringify(response));
+      return;
     }
 
+    if (isDangerousHostExecCommand(req.command)) {
+      log.info('host_exec: approval requested', {
+        reqId: req.id,
+        command: req.command,
+        cwd: req.cwd,
+        timeout: req.timeout,
+      });
+      const requested = await requestHostExecApproval(session, req, resPath);
+      if (!requested) {
+        response = deniedResponse('host_exec command required approval, but no approver channel was available.');
+        writeAtomic(resPath, JSON.stringify(response));
+      }
+      return;
+    }
+
+    log.info('host_exec: running', { reqId: req.id, command: req.command, cwd: req.cwd, timeout: req.timeout });
+    response = await runCommand(req);
+    log.info('host_exec: completed', { reqId: req.id, exitCode: response.exitCode });
     writeAtomic(resPath, JSON.stringify(response));
   } finally {
     inflight.delete(inflightKey);
@@ -161,7 +311,7 @@ export async function pollOnce(): Promise<void> {
 
     for (const f of files) {
       // Fire-and-forget so a single slow command doesn't block other sessions.
-      void processRequest(reqDir, resDir, f, allowed);
+      void processRequest(session, reqDir, resDir, f, allowed);
     }
   }
 }
@@ -187,3 +337,6 @@ export function startHostExecWatcher(): void {
 export function stopHostExecWatcher(): void {
   polling = false;
 }
+
+registerApprovalHandler('host_exec', applyApprovedHostExec);
+registerApprovalRejectionHandler('host_exec', rejectHostExec);

@@ -359,6 +359,10 @@ function buildMounts(
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
 
+  // Shared command registry — read-only, imported by /app/src via ../../../shared.
+  const sharedSrc = path.join(projectRoot, 'src', 'shared');
+  mounts.push({ hostPath: sharedSrc, containerPath: '/shared', readonly: true });
+
   // Shared skills — read-only, symlinks in .codex-shared/skills/ point here.
   const skillsSrc = path.join(projectRoot, 'container', 'skills');
   if (fs.existsSync(skillsSrc)) {

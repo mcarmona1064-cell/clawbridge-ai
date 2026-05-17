@@ -7,12 +7,10 @@
  *   "Permission denied" response written directly to messages_out
  * - Normal messages: pass through unchanged
  */
+import { classifySlashCommand } from './shared/commands.js';
 import { getDb, hasTable } from './db/connection.js';
 
 export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string };
-
-const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/remote-control']);
-const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files']);
 
 /**
  * Classify a message and decide whether it should reach the container.
@@ -29,21 +27,14 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
     text = content.trim();
   }
 
-  if (!text.startsWith('/')) return { action: 'pass' };
+  const classified = classifySlashCommand(text);
+  if (classified.category === 'none' || classified.category === 'passthrough') return { action: 'pass' };
+  if (classified.category === 'filtered') return { action: 'filter' };
 
-  const command = text.split(/\s/)[0].toLowerCase();
-
-  if (FILTERED_COMMANDS.has(command)) return { action: 'filter' };
-
-  if (ADMIN_COMMANDS.has(command)) {
-    if (isAdmin(userId, agentGroupId)) {
-      return { action: 'pass' };
-    }
-    return { action: 'deny', command };
+  if (isAdmin(userId, agentGroupId)) {
+    return { action: 'pass' };
   }
-
-  // Unknown slash commands pass through (the agent/SDK handles them)
-  return { action: 'pass' };
+  return { action: 'deny', command: classified.command };
 }
 
 function isAdmin(userId: string | null, agentGroupId: string): boolean {

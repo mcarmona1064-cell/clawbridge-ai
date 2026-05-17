@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags } from './formatter.js';
+import { formatMessages, stripInternalTags, categorizeMessage, isClearCommand } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -38,6 +38,39 @@ function insertMessage(
     )
     .run(id, kind, timestamp, JSON.stringify(content));
 }
+
+function message(content: object | string, channelType = 'telegram') {
+  return {
+    id: 'cmd-1',
+    seq: 1,
+    kind: 'chat',
+    timestamp: new Date().toISOString(),
+    status: 'pending',
+    process_after: null,
+    processing_started_at: null,
+    retry_count: 0,
+    platform_id: 'chat-1',
+    channel_type: channelType,
+    thread_id: null,
+    reply_to_session: null,
+    content: typeof content === 'string' ? content : JSON.stringify(content),
+  } as any;
+}
+
+describe('command categorization', () => {
+  it('uses exact first-token matching for slash commands', () => {
+    expect(categorizeMessage(message({ text: '/start' })).category).toBe('filtered');
+    expect(categorizeMessage(message({ text: '/clear now' })).category).toBe('admin');
+    expect(categorizeMessage(message({ text: '/clearfoo' })).category).toBe('passthrough');
+    expect(categorizeMessage(message({ text: 'hello' })).category).toBe('none');
+  });
+
+  it('only clears on exact /clear command token', () => {
+    expect(isClearCommand(message({ text: '/clear' }))).toBe(true);
+    expect(isClearCommand(message({ text: '/clear please' }))).toBe(true);
+    expect(isClearCommand(message({ text: '/clearfoo' }))).toBe(false);
+  });
+});
 
 describe('context timezone header', () => {
   it('prepends <context timezone="..."/> to formatted output', () => {

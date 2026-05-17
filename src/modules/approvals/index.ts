@@ -17,7 +17,12 @@ import { registerResponseHandler } from '../../response-registry.js';
 import { handleApprovalsResponse } from './response-handler.js';
 
 // Public API re-exports so consumers import from the module root.
-export { requestApproval, registerApprovalHandler, notifyAgent } from './primitive.js';
+export {
+  requestApproval,
+  registerApprovalHandler,
+  registerApprovalRejectionHandler,
+  notifyAgent,
+} from './primitive.js';
 export type { ApprovalHandler, ApprovalHandlerContext, RequestApprovalOptions } from './primitive.js';
 
 registerResponseHandler(handleApprovalsResponse);
