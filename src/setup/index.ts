@@ -182,8 +182,9 @@ function buildEnvFile(cfg: FreshConfig, existingEnv?: Map<string, string>): stri
       `HINDSIGHT_URL=${cfg.hindsightUrl}`,
       `HINDSIGHT_API_KEY=${cfg.hindsightApiKey}`,
       `HINDSIGHT_DB_PASSWORD=${cfg.hindsightDbPassword}`,
-      '# Optional: separate API key for Hindsight LLM ops.',
-      `HINDSIGHT_LLM_API_KEY=${existingEnv?.get('HINDSIGHT_LLM_API_KEY') ?? ''}`,
+      '# Hindsight LLM ops use OpenAI Codex OAuth from ~/.codex/auth.json.',
+      'HINDSIGHT_LLM_PROVIDER=openai-codex',
+      `HINDSIGHT_LLM_MODEL=${existingEnv?.get('HINDSIGHT_LLM_MODEL') ?? 'gpt-5.4-mini'}`,
       '',
     );
   }
@@ -499,10 +500,11 @@ async function runFreshInstall(): Promise<void> {
     const existingForHindsight = parseEnvFile(envPath);
     const hindsightLines: string[] = [''];
     const hindsightProviderVars = {
-      HINDSIGHT_LLM_PROVIDER: 'openai',
-      HINDSIGHT_API_RETAIN_LLM_MODEL: 'gpt-4o-mini',
-      HINDSIGHT_API_CONSOLIDATION_LLM_MODEL: 'gpt-4o-mini',
-      HINDSIGHT_API_REFLECT_LLM_MODEL: 'gpt-4o',
+      HINDSIGHT_LLM_PROVIDER: 'openai-codex',
+      HINDSIGHT_LLM_MODEL: 'gpt-5.4-mini',
+      HINDSIGHT_API_RETAIN_LLM_MODEL: 'gpt-5.4-mini',
+      HINDSIGHT_API_CONSOLIDATION_LLM_MODEL: 'gpt-5.4-mini',
+      HINDSIGHT_API_REFLECT_LLM_MODEL: 'gpt-5.4-mini',
     };
     for (const [key, value] of Object.entries(hindsightProviderVars)) {
       if (!existingForHindsight.get(key)) {

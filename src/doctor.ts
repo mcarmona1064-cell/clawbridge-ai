@@ -779,11 +779,12 @@ function checkProvider(env: Map<string, string>): void {
   // Auto-fix Hindsight LLM vars if HINDSIGHT_URL is set
   const hindsightUrl = env.get('HINDSIGHT_URL');
   if (hindsightUrl) {
-    const expectedLlmProvider = 'openai';
+    const expectedLlmProvider = 'openai-codex';
     const expectedModels = {
-      retain: 'gpt-4o-mini',
-      consolidation: 'gpt-4o-mini',
-      reflect: 'gpt-4o',
+      global: 'gpt-5.4-mini',
+      retain: 'gpt-5.4-mini',
+      consolidation: 'gpt-5.4-mini',
+      reflect: 'gpt-5.4-mini',
     };
 
     const envPath = path.join(os.homedir(), '.clawbridge', '.env');
@@ -812,6 +813,7 @@ function checkProvider(env: Map<string, string>): void {
     }
 
     const expectedHindsightVars = {
+      HINDSIGHT_LLM_MODEL: expectedModels.global,
       HINDSIGHT_API_RETAIN_LLM_MODEL: expectedModels.retain,
       HINDSIGHT_API_CONSOLIDATION_LLM_MODEL: expectedModels.consolidation,
       HINDSIGHT_API_REFLECT_LLM_MODEL: expectedModels.reflect,

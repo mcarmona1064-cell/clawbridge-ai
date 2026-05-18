@@ -2,81 +2,110 @@
 
 ## What is Hindsight?
 
-Hindsight is a self-hosted semantic memory layer built on [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight). It gives ClawBridge persistent, searchable memory across conversations — storing, indexing, and recalling facts using vector embeddings rather than keyword search.
+Hindsight is a self-hosted semantic memory layer built on [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight). It gives ClawBridge persistent, searchable memory across conversations by storing, indexing, and recalling facts with vector embeddings.
 
-ClawBridge runs Hindsight as a Docker container alongside the other services defined in `integrations/docker-compose.yml`.
+ClawBridge runs Hindsight as Docker services from `integrations/docker-compose.yml`:
+
+- `hindsight-api` — API, retain/recall/reflect, and MCP server
+- `hindsight-db` — PostgreSQL/pgvector storage
 
 ---
 
 ## Host/Container Boundary — CRITICAL
 
-Hindsight runs on the **host only**. Agent containers never see Hindsight environment variables.
+Hindsight runs on the **host side**. Agent containers never receive Hindsight API keys, database passwords, or LLM credentials.
 
-| Layer | Has Hindsight access? |
-|---|---|
-| Host process (`src/index.ts`) | Yes — reads `HINDSIGHT_URL` and `HINDSIGHT_API_KEY` from `~/.clawbridge/.env` |
-| Agent containers | No — Hindsight env vars are intentionally excluded from container env |
+- Host process (`src/index.ts`): reads `HINDSIGHT_URL` and `HINDSIGHT_API_KEY` from `~/.clawbridge/.env`, calls Hindsight, and injects recalled context into agent turns.
+- Agent containers: no direct Hindsight environment access. Memory retrieval is injected as context by the host.
+- Hindsight container: reads OpenAI Codex OAuth from a read-only mount of `~/.codex/auth.json`.
 
-This is by design: containers are untrusted sandboxes. Memory operations happen in the host process before and after each container turn.
+This keeps memory and channel credentials out of untrusted agent sandboxes.
 
 ---
 
 ## The Three Operations
 
-### 1. Recall (before container wake)
+### 1. Recall before container wake
 
-Before spinning up an agent container for a new message, the host process queries Hindsight for relevant memories:
-
-```
+```text
 host receives message
   → recall(query=message, bank=client-{agentGroupId})
-  → inject top-k results into container's AGENTS.md context
+  → inject top-k results into the agent context
   → wake container
 ```
 
-### 2. Retain (after each delivered turn)
+### 2. Retain after each delivered turn
 
-After the container produces a response and it is delivered to the user, the host distils the turn into memory:
-
-```
+```text
 container turn completes
+  → host delivers response
   → retain(content=turn_summary, bank=client-{agentGroupId})
 ```
 
-Model used: **claude-haiku** (fast, cheap — runs after every turn).
+### 3. Reflect during host sweep
 
-### 3. Reflect (nightly via host-sweep)
-
-The host sweep (`src/host-sweep.ts`) runs nightly and triggers a consolidation pass over each agent's memory bank:
-
-```
-nightly cron
+```text
+host sweep
   → reflect(bank=client-{agentGroupId})
 ```
 
-This merges redundant memories, promotes important facts to long-term storage, and prunes stale entries.
+Reflect consolidates redundant memories, promotes important facts, and prunes stale entries.
 
-Model used: **claude-sonnet** (higher quality — runs once per night, not per turn).
+---
+
+## LLM Provider and Authentication
+
+Hindsight must use **OpenAI Codex OAuth**, not OpenAI API-key billing.
+
+ClawBridge configures Hindsight with:
+
+```env
+HINDSIGHT_LLM_PROVIDER=openai-codex
+HINDSIGHT_LLM_MODEL=gpt-5.4-mini
+```
+
+The Hindsight Docker service maps this to Hindsight's API env vars:
+
+```yaml
+HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_LLM_PROVIDER:-openai-codex}
+HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_LLM_MODEL:-gpt-5.4-mini}
+```
+
+The Hindsight image's `openai-codex` provider reads ChatGPT/Codex OAuth from:
+
+```text
+/home/hindsight/.codex/auth.json
+```
+
+`integrations/docker-compose.yml` provides that file by mounting the host Codex auth directory read-only:
+
+```yaml
+volumes:
+  - ${HOME}/.codex:/home/hindsight/.codex:ro
+```
+
+To authenticate or refresh the token, run on the host:
+
+```bash
+codex login --device-auth
+```
+
+Do **not** set Hindsight to `openai` with `OPENAI_API_KEY` unless you intentionally want separate OpenAI API billing.
 
 ---
 
 ## Model Config
 
-| Operation | Model | Rationale |
-|---|---|---|
-| retain | Haiku | Runs every turn — must be fast and cheap |
-| consolidation | Haiku | Background batch work |
-| reflect | Sonnet | Nightly quality pass — worth the extra cost |
+Default model for retain, consolidation, and reflect:
 
----
+```env
+HINDSIGHT_LLM_MODEL=gpt-5.4-mini
+HINDSIGHT_API_RETAIN_LLM_MODEL=gpt-5.4-mini
+HINDSIGHT_API_CONSOLIDATION_LLM_MODEL=gpt-5.4-mini
+HINDSIGHT_API_REFLECT_LLM_MODEL=gpt-5.4-mini
+```
 
-## Authentication
-
-Hindsight uses the `claude-code` provider, which reads `HINDSIGHT_LLM_API_KEY` from the environment.
-
-**This is not a bare OpenAI API key.** It is the long-lived OAuth token issued by `configure HINDSIGHT_LLM_API_KEY` (starts with `sk-ant-oat`).
-
-If you have a separate API budget for Hindsight LLM operations, set `HINDSIGHT_LLM_API_KEY` in `~/.clawbridge/.env`. If unset, Hindsight falls back to `HINDSIGHT_LLM_API_KEY`.
+`clawbridge-codex doctor --fix` normalizes these values when Hindsight is enabled.
 
 ---
 
@@ -84,11 +113,9 @@ If you have a separate API budget for Hindsight LLM operations, set `HINDSIGHT_L
 
 Each registered agent group gets its own isolated memory bank:
 
-```
+```text
 client-{agentGroupId}
 ```
-
-Where `agentGroupId` is the group's JID (e.g. `120363336345536173@g.us` → bank `client-120363336345536173@g.us`).
 
 Banks are created automatically on first use.
 
@@ -96,36 +123,47 @@ Banks are created automatically on first use.
 
 ## Configuration Keys (`~/.clawbridge/.env`)
 
-| Key | Description |
-|---|---|
-| `HINDSIGHT_URL` | Base URL of the Hindsight API (default: `http://localhost:8888`) |
-| `HINDSIGHT_API_KEY` | API key for authenticating requests to Hindsight |
-| `HINDSIGHT_DB_PASSWORD` | PostgreSQL password for the Hindsight database container |
-| `HINDSIGHT_LLM_API_KEY` | Optional separate OAuth token for Hindsight's LLM calls |
+- `HINDSIGHT_URL`: Base URL of the Hindsight API. Default: `http://localhost:8888`.
+- `HINDSIGHT_API_KEY`: Tenant API key for authenticating host requests to Hindsight.
+- `HINDSIGHT_DB_PASSWORD`: PostgreSQL password for the Hindsight database container.
+- `HINDSIGHT_LLM_PROVIDER`: Should be `openai-codex` for Codex OAuth.
+- `HINDSIGHT_LLM_MODEL`: Codex model used by Hindsight LLM operations.
 
 ---
 
 ## Troubleshooting
 
 **Check if Hindsight is healthy:**
+
 ```bash
 curl -s http://localhost:8888/health -H "x-api-key: <your-key>" | jq
 # Expected: {"status":"healthy","database":"connected"}
 ```
 
 **Check container logs:**
+
 ```bash
 docker logs hindsight-api --tail 50
 docker logs hindsight-db --tail 20
 ```
 
-**reflect returns 401:**
-The `reflect` call is being made with a wrong or expired token. Check that `HINDSIGHT_LLM_API_KEY` (or `HINDSIGHT_LLM_API_KEY` if set) is a valid long-lived OAuth token — not a short-lived keychain credential. Regenerate with `configure HINDSIGHT_LLM_API_KEY`.
+**Hindsight reports missing Codex credentials:**
 
-**Hindsight not healthy after `clawbridge upgrade`:**
-The Docker image may need pulling. Run:
+```bash
+codex login --device-auth
+cd ~/.clawbridge && docker compose up -d --force-recreate hindsight-api
+```
+
+Then confirm the mount exists inside the container:
+
+```bash
+docker exec hindsight-api test -f /home/hindsight/.codex/auth.json && echo ok
+```
+
+**Hindsight not healthy after `clawbridge-codex upgrade`:**
+
 ```bash
 cd ~/.clawbridge && docker compose pull hindsight-api && docker compose up -d hindsight-api
 ```
 
-**Run `clawbridge doctor`** to check Hindsight health alongside all other services.
+**Run `clawbridge-codex doctor --fix`** to check Hindsight health and normalize Codex OAuth provider settings.

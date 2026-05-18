@@ -387,9 +387,9 @@ ClawBridge Codex runs the `codex` CLI in subscription/OAuth mode. Authenticate o
 codex login --device-auth
 ```
 
-The login writes `~/.codex/auth.json`, which is mounted read-only into agent containers. Runtime setup does **not** accept `OPENAI_API_KEY` or `CODEX_API_KEY` as a substitute for subscription OAuth; the Codex subprocess strips API-key env vars so a stray key cannot silently switch the agent to API billing.
+The login writes `~/.codex/auth.json`, which is mounted read-only into agent containers and the Hindsight API container. Runtime setup does **not** accept `OPENAI_API_KEY` or `CODEX_API_KEY` as a substitute for subscription OAuth; the Codex subprocess strips API-key env vars so a stray key cannot silently switch the agent to API billing.
 
-For optional Hindsight LLM calls, set `HINDSIGHT_LLM_API_KEY` separately if you do not want Hindsight to inherit `OPENAI_API_KEY` from its own service environment.
+Hindsight LLM calls use the same OpenAI Codex OAuth path via `HINDSIGHT_LLM_PROVIDER=openai-codex`; `integrations/docker-compose.yml` mounts `~/.codex` read-only at `/home/hindsight/.codex`.
 
 ### Changing the Assistant Name
 

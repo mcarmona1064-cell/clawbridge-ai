@@ -127,7 +127,7 @@ Upgrade checks npm for the latest version, stops the running service, installs t
 
 Every agent group has persistent files, including `AGENTS.local.md`, Codex session state, and conversation history. For semantic memory, setup can enable Hindsight. Hindsight runs as host-side Docker services (`hindsight-api` and `hindsight-db`), not inside the agent container. The host retrieves memory and injects relevant context into each agent turn.
 
-If Hindsight is configured, `clawbridge-codex doctor` checks the containers and `/health`; `doctor --fix` can start the containers and set the default OpenAI model env vars. Retain/recall default to `gpt-4o-mini`; reflect defaults to `gpt-4o`.
+If Hindsight is configured, `clawbridge-codex doctor` checks the containers and `/health`; `doctor --fix` can start the containers and normalize Hindsight to the `openai-codex` provider. Hindsight reads OpenAI Codex OAuth from `~/.codex/auth.json` via a read-only Docker mount, so retain/recall/reflect use the same Codex subscription auth path as the agent instead of `OPENAI_API_KEY` billing.
 
 ## Philosophy
 

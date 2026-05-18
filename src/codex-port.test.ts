@@ -68,6 +68,31 @@ describe('Codex port regression checks', () => {
     expect(quickStart).toContain('$HOME/.local/share/clawbridge-codex/source');
   });
 
+  it('configures Hindsight to use OpenAI Codex OAuth instead of OpenAI API keys', () => {
+    const compose = read('integrations/docker-compose.yml');
+    expect(compose).toContain('HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_LLM_PROVIDER:-openai-codex}');
+    expect(compose).toContain('${HOME}/.codex:/home/hindsight/.codex:ro');
+    expect(compose).not.toMatch(/HINDSIGHT_API_LLM_API_KEY:\s*\$\{HINDSIGHT_LLM_API_KEY:-\$\{OPENAI_API_KEY\}\}/);
+    expect(compose).not.toContain('uses OpenAI by default');
+
+    const setupWizard = read('src/setup/index.ts');
+    expect(setupWizard).toContain("HINDSIGHT_LLM_PROVIDER: 'openai-codex'");
+    expect(setupWizard).not.toContain("HINDSIGHT_LLM_PROVIDER: 'openai'");
+    expect(setupWizard).not.toContain('separate API key for Hindsight LLM ops');
+
+    const doctor = read('src/doctor.ts');
+    expect(doctor).toContain("expectedLlmProvider = 'openai-codex'");
+    expect(doctor).toContain('Codex auth');
+  });
+
+  it('keeps active Hindsight docs on OpenAI Codex OAuth and not stale Claude/OpenAI API-key auth', () => {
+    const hindsightDocs = read('docs/hindsight.md');
+    expect(hindsightDocs).toContain('openai-codex');
+    expect(hindsightDocs).toContain('~/.codex/auth.json');
+    expect(hindsightDocs).toContain('codex login --device-auth');
+    expect(hindsightDocs).not.toMatch(/claude-code|CLAUDE_CODE_OAUTH_TOKEN|sk-ant|bare OpenAI API key/i);
+  });
+
   it('keeps active command hints on clawbridge-codex names', () => {
     const activeHintFiles = [
       'src/doctor.ts',

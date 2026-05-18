@@ -33,6 +33,9 @@ services:
     ports:
       - '8888:8888'
       - '9999:9999'
+    volumes:
+      # Hindsight's openai-codex provider reads ChatGPT/Codex OAuth here.
+      - ${HOME}/.codex:/home/hindsight/.codex:ro
     depends_on:
       hindsight-db:
         condition: service_healthy
@@ -40,13 +43,13 @@ services:
       - clawbridge
     environment:
       HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD}@hindsight-db:5432/hindsight
-      # LLM — uses OpenAI by default; set HINDSIGHT_LLM_API_KEY to isolate billing/limits
-      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_LLM_PROVIDER:-openai}
-      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_LLM_API_KEY:-${OPENAI_API_KEY}}
-      # Small model for retain/consolidation, larger model for reflection
-      HINDSIGHT_API_RETAIN_LLM_MODEL: gpt-4o-mini
-      HINDSIGHT_API_CONSOLIDATION_LLM_MODEL: gpt-4o-mini
-      HINDSIGHT_API_REFLECT_LLM_MODEL: gpt-4o
+      # LLM — use OpenAI Codex OAuth from ~/.codex/auth.json, not OpenAI API-key billing.
+      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_LLM_PROVIDER:-openai-codex}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_LLM_MODEL:-gpt-5.4-mini}
+      # Keep operation-specific model envs aligned with the Codex OAuth provider.
+      HINDSIGHT_API_RETAIN_LLM_MODEL: ${HINDSIGHT_API_RETAIN_LLM_MODEL:-gpt-5.4-mini}
+      HINDSIGHT_API_CONSOLIDATION_LLM_MODEL: ${HINDSIGHT_API_CONSOLIDATION_LLM_MODEL:-gpt-5.4-mini}
+      HINDSIGHT_API_REFLECT_LLM_MODEL: ${HINDSIGHT_API_REFLECT_LLM_MODEL:-gpt-5.4-mini}
       # Full image includes local embeddings + reranker — no OpenAI needed
       HINDSIGHT_API_EMBEDDINGS_PROVIDER: local
       HINDSIGHT_API_RERANKER_PROVIDER: local
