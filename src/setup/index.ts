@@ -788,33 +788,23 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
     ) as MigrationSelection[];
   }
 
-  // 3b. Hindsight config (optional — if user has Hindsight enabled)
+  // 3b. Hindsight config — auto-configure (credentials generated, same as fresh install)
   let hindsightCfg: HindsightConfig | undefined;
+  let autoHindsightDbPassword: string | undefined;
+  let autoHindsightApiKey: string | undefined;
+  let autoHindsightUrl: string | undefined;
   const wantsHindsightMigration = ensure(
     await p.confirm({
-      message: 'Migrate memory entries to Hindsight semantic memory? (requires Hindsight running)',
-      initialValue: false,
+      message: 'Migrate memory entries to Hindsight semantic memory?',
+      initialValue: true,
     }),
   ) as boolean;
   if (wantsHindsightMigration) {
-    const hindsightUrl = (
-      ensure(
-        await p.text({
-          message: 'Hindsight URL',
-          placeholder: 'http://localhost:8888',
-          defaultValue: 'http://localhost:8888',
-        }),
-      ) as string
-    ).trim();
-    const hindsightApiKey = (
-      ensure(
-        await p.password({
-          message: 'Hindsight API key',
-          validate: validateRequired,
-        }),
-      ) as string
-    ).trim();
-    hindsightCfg = { url: hindsightUrl, apiKey: hindsightApiKey };
+    autoHindsightDbPassword = crypto.randomBytes(16).toString('hex');
+    autoHindsightApiKey = crypto.randomBytes(16).toString('hex');
+    autoHindsightUrl = 'http://localhost:8888';
+    hindsightCfg = { url: autoHindsightUrl, apiKey: autoHindsightApiKey };
+    p.log.info(dim('Hindsight credentials auto-generated — will be written to .env'));
   }
 
   // 4. Safety notice + confirm
@@ -954,12 +944,16 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
     p.log.success('Admin credentials found in source ✓');
   }
 
-  // Step E — Hindsight (skip if already configured in source)
+  // Step E — Hindsight (use auto-generated creds from 3b if available, else detect from source)
+  const existingHindsightUrl = autoHindsightUrl ?? sourceEnv.get('HINDSIGHT_URL');
   const {
-    dbPassword: migratedHindsightDbPw,
-    apiKey: migratedHindsightApiKey,
-    url: migratedHindsightUrl,
-  } = await promptHindsight(sourceEnv.get('HINDSIGHT_URL'));
+    dbPassword: promptedHindsightDbPw,
+    apiKey: promptedHindsightApiKey,
+    url: promptedHindsightUrl,
+  } = await promptHindsight(existingHindsightUrl);
+  const migratedHindsightDbPw = promptedHindsightDbPw ?? autoHindsightDbPassword;
+  const migratedHindsightApiKey = promptedHindsightApiKey ?? autoHindsightApiKey;
+  const migratedHindsightUrl = promptedHindsightUrl ?? autoHindsightUrl;
 
   // Detect channels from source .env for the new .env
   const migratedChannels: string[] = [];
