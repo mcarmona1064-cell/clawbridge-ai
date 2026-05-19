@@ -160,6 +160,10 @@ export async function hindsightRetain(
  * @param query      - What to retrieve (e.g. 'user background and preferences')
  * @param opts       - Tag filters and retrieval options
  */
+// Hindsight API rejects queries longer than 500 tokens (~1 token ≈ 4 chars).
+// Truncate at 1500 chars to stay safely under the limit.
+const MAX_RECALL_QUERY_CHARS = 1500;
+
 export async function hindsightRecall(
   clientSlug: string,
   query: string,
@@ -173,9 +177,13 @@ export async function hindsightRecall(
 ): Promise<string> {
   if (!(await isHindsightAvailable())) return '';
 
+  const truncatedQuery = query.length > MAX_RECALL_QUERY_CHARS
+    ? query.slice(0, MAX_RECALL_QUERY_CHARS)
+    : query;
+
   try {
     const tags = buildTags({ clientSlug, userId: opts.userId });
-    const response = await getHindsightClient().recall(bankId(clientSlug), query, {
+    const response = await getHindsightClient().recall(bankId(clientSlug), truncatedQuery, {
       tags,
       tagsMatch: 'any_strict', // CRITICAL: prevents cross-client data leakage
       budget: opts.budget ?? 'mid',
