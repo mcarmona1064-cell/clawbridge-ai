@@ -28,7 +28,12 @@ const DEFINITIONS: SlashCommandDefinition[] = [
   { command: '/status', category: 'host', adminOnly: false, description: 'Show current session status' },
   { command: '/whoami', category: 'host', adminOnly: false, description: 'Show your user info and permissions' },
   { command: '/commands', category: 'host', adminOnly: false, description: 'List available commands' },
-  { command: '/goal', category: 'host', adminOnly: false, description: 'Set or clear a persistent goal (/goal <target> or /goal clear)' },
+  {
+    command: '/goal',
+    category: 'host',
+    adminOnly: false,
+    description: 'Set or clear a persistent goal (/goal <target> or /goal clear)',
+  },
 ];
 
 export const COMMAND_REGISTRY = Object.freeze(DEFINITIONS.map((def) => Object.freeze({ ...def })));

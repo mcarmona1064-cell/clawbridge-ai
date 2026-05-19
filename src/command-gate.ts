@@ -10,7 +10,11 @@
 import { classifySlashCommand, COMMAND_REGISTRY } from './shared/commands.js';
 import { getDb, hasTable } from './db/connection.js';
 
-export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string } | { action: 'handle'; command: string };
+export type GateResult =
+  | { action: 'pass' }
+  | { action: 'filter' }
+  | { action: 'deny'; command: string }
+  | { action: 'handle'; command: string };
 
 /**
  * Classify a message and decide whether it should reach the container.

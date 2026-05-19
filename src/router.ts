@@ -529,7 +529,9 @@ async function deliverToAgent(
           });
         }
       }
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 
   writeSessionMessage(session.agent_group_id, session.id, {
