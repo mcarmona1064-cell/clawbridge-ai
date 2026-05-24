@@ -143,7 +143,7 @@ export async function hindsightRetain(
   } catch (e) {
     if (e instanceof HindsightError) {
       log.error('[hindsight] retain failed', { status: e.statusCode, message: e.message });
-      if (e.statusCode === 503 || e.statusCode === 0) resetAvailability();
+      if (e.statusCode === 0 || (e.statusCode !== undefined && e.statusCode >= 500)) resetAvailability();
     } else {
       log.error('[hindsight] retain unexpected error', { err: e });
     }
@@ -198,7 +198,7 @@ export async function hindsightRecall(
   } catch (e) {
     if (e instanceof HindsightError) {
       log.error('[hindsight] recall failed', { status: e.statusCode, message: e.message });
-      if (e.statusCode === 503 || e.statusCode === 0) resetAvailability();
+      if (e.statusCode === 0 || (e.statusCode !== undefined && e.statusCode >= 500)) resetAvailability();
     } else {
       log.error('[hindsight] recall unexpected error', { err: e });
     }
@@ -312,7 +312,7 @@ export async function hindsightReflect(
   } catch (e) {
     if (e instanceof HindsightError) {
       log.error('[hindsight] reflect failed', { status: e.statusCode, message: e.message });
-      if (e.statusCode === 503 || e.statusCode === 0) resetAvailability();
+      if (e.statusCode === 0 || (e.statusCode !== undefined && e.statusCode >= 500)) resetAvailability();
     } else {
       log.error('[hindsight] reflect unexpected error', { err: e });
     }

@@ -211,7 +211,12 @@ async function runWeeklyCrossClientReport(): Promise<void> {
   log.info('[memory] Running weekly cross-client report', { week: weekKey });
   try {
     const sessions = getActiveSessions();
-    const clientIds = sessions.map((s) => s.id);
+    const clientSlugs = new Set<string>();
+    clientSlugs.add('global');
+    for (const session of sessions) {
+      clientSlugs.add(session.id);
+    }
+    const clientIds = [...clientSlugs];
     if (clientIds.length < 2) {
       log.debug('[memory] Not enough clients for weekly report', { count: clientIds.length });
       return;
