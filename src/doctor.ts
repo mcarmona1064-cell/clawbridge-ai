@@ -221,7 +221,7 @@ function checkContainerImage(autoFix: boolean): void {
       if (autoFix) {
         try {
           const pkgDir = path.dirname(fileURLToPath(import.meta.url));
-          const projectRoot = path.resolve(pkgDir, '../..');
+          const projectRoot = path.resolve(pkgDir, '..');
           execSync('bash container/build.sh', { cwd: projectRoot, stdio: 'inherit' });
           pass('Agent image', 'built');
         } catch {
@@ -387,6 +387,7 @@ async function checkSystemd(autoFix: boolean): Promise<void> {
         try {
           const isRoot = process.getuid?.() === 0;
           const prefix = isRoot ? 'systemctl' : 'systemctl --user';
+          if (!isRoot) { try { execSync('loginctl enable-linger', { stdio: 'pipe' }); } catch {} }
           execSync(`${prefix} restart ${unitName}`, { stdio: 'pipe' });
           pass('Systemd service', `${unitName} (restarted)`);
         } catch (e) {
@@ -438,7 +439,7 @@ function checkDockerComposeSymlink(autoFix: boolean): void {
     if (autoFix) {
       try {
         const pkgDir = path.dirname(fileURLToPath(import.meta.url));
-        const composeSrc = path.resolve(pkgDir, '../../integrations/docker-compose.yml');
+        const composeSrc = path.resolve(pkgDir, '../integrations/docker-compose.yml');
         const composeDest = path.join(os.homedir(), '.clawbridge', 'docker-compose.yml');
         fs.mkdirSync(path.dirname(composeDest), { recursive: true });
         fs.symlinkSync(composeSrc, composeDest);

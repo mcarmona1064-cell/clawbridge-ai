@@ -177,9 +177,7 @@ export async function hindsightRecall(
 ): Promise<string> {
   if (!(await isHindsightAvailable())) return '';
 
-  const truncatedQuery = query.length > MAX_RECALL_QUERY_CHARS
-    ? query.slice(0, MAX_RECALL_QUERY_CHARS)
-    : query;
+  const truncatedQuery = query.length > MAX_RECALL_QUERY_CHARS ? query.slice(0, MAX_RECALL_QUERY_CHARS) : query;
 
   try {
     const tags = buildTags({ clientSlug, userId: opts.userId });

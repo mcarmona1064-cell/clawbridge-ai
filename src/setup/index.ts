@@ -1233,6 +1233,7 @@ async function registerSystemd(assistantName: string): Promise<void> {
 
     try {
       execSync(`${systemctlPrefix} daemon-reload`, { encoding: 'utf-8' });
+      if (!runningAsRoot) { try { execSync('loginctl enable-linger', { encoding: 'utf-8' }); } catch {} }
       execSync(`${systemctlPrefix} enable --now ${unit}`, { encoding: 'utf-8' });
       p.log.success('ClawBridge agent registered with systemd and will start automatically.');
     } catch (err) {
