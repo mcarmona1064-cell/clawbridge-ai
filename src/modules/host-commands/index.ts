@@ -8,6 +8,8 @@ import fs2 from 'fs';
 import path from 'path';
 
 import { GROUPS_DIR } from '../../config.js';
+import { getAllAgentGroups } from '../../db/agent-groups.js';
+import { getAllAgentHealth } from '../../db/agent-health.js';
 import { COMMAND_REGISTRY } from '../../shared/commands.js';
 import { getPendingApproval, getPendingApprovalsByDeliveryChannel } from '../../db/sessions.js';
 import { getDb, hasTable } from '../../db/connection.js';
@@ -53,6 +55,10 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return await handleGoal(ctx, write);
       case '/update':
         return await handleUpdate(ctx, write);
+      case '/agents':
+        return handleAgents(ctx, write);
+      case '/health':
+        return handleHealth(ctx, write);
       default:
         write('Unknown host command: ' + ctx.command);
     }
@@ -241,4 +247,63 @@ async function handleUpdate(ctx: HostCommandContext, write: WriteResponse): Prom
   } catch (err) {
     write('Update check failed: ' + ((err as Error).message || String(err)));
   }
+}
+
+function handleAgents(_ctx: HostCommandContext, write: WriteResponse): void {
+  const groups = getAllAgentGroups();
+  if (groups.length === 0) {
+    write('No agent groups found.');
+    return;
+  }
+  const lines: string[] = [`Agent Groups (${groups.length})`, ''];
+  for (const g of groups) {
+    const desc = g.description ? `  ${g.description}` : '';
+    lines.push(`${g.name}${desc}`);
+  }
+  write(lines.join('\n'));
+}
+
+function handleHealth(_ctx: HostCommandContext, write: WriteResponse): void {
+  const groups = getAllAgentGroups();
+  if (groups.length === 0) {
+    write('No agent groups found.');
+    return;
+  }
+
+  let healthRows: ReturnType<typeof getAllAgentHealth>;
+  try {
+    healthRows = getAllAgentHealth();
+  } catch {
+    write('Health data not available (run a version upgrade to enable health monitoring).');
+    return;
+  }
+
+  const healthMap = new Map(healthRows.map((r) => [r.agent_group_id, r]));
+  const lines: string[] = ['Agent Health', ''];
+
+  for (const g of groups) {
+    const h = healthMap.get(g.id);
+    if (!h || h.consecutive_errors === 0) {
+      const lastOk = h?.last_ok_at ? `last ok: ${timeSince(h.last_ok_at)}` : 'no data yet';
+      lines.push(`${g.name}  ✅  ${lastOk}`);
+    } else if (h.consecutive_errors < 3) {
+      lines.push(
+        `${g.name}  ⚠️  ${h.consecutive_errors} error${h.consecutive_errors === 1 ? '' : 's'} — last: "${h.last_error ?? 'unknown'}"`,
+      );
+    } else {
+      lines.push(
+        `${g.name}  ❌  ${h.consecutive_errors} errors — last: "${h.last_error ?? 'unknown'}"`,
+      );
+    }
+  }
+
+  write(lines.join('\n'));
+}
+
+function timeSince(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+  return `${Math.round(ms / 86_400_000)}d ago`;
 }

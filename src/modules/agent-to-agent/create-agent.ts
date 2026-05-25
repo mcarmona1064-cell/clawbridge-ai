@@ -2,14 +2,14 @@
  * `create_agent` delivery-action handler.
  *
  * Spawns a new agent group on demand from the parent agent, wires bidirectional
- * agent_destinations rows, projects the new destination into the parent's
- * running container, and notifies the parent.
+ * agent_destinations rows, projects the new destination into ALL active sessions
+ * of the parent group (not just the triggering one), and notifies the parent.
  */
 import path from 'path';
 
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
-import { getSession } from '../../db/sessions.js';
+import { getSession, getSessionsByAgentGroup } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { initGroupFilesystem } from '../../group-init.js';
 import { log } from '../../log.js';
@@ -38,6 +38,7 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   const requestId = content.requestId as string;
   const name = content.name as string;
   const instructions = content.instructions as string | null;
+  const description = typeof content.description === 'string' ? content.description : null;
 
   const sourceGroup = getAgentGroup(session.agent_group_id);
   if (!sourceGroup) {
@@ -78,6 +79,7 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
     id: agentGroupId,
     name,
     folder,
+    description,
     agent_provider: null,
     created_at: now,
   };
@@ -109,11 +111,13 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
     created_at: now,
   });
 
-  // REQUIRED: project the new destination into the running container's
-  // inbound.db. See the top-of-file invariant in db/agent-destinations.ts
-  // — forgetting this causes "dropped: unknown destination" when the parent
-  // tries to send to the newly-created child.
-  writeDestinations(session.agent_group_id, session.id);
+  // Project the new destination into ALL active sessions of the parent group so
+  // every running container instance sees the child immediately — not only the
+  // session that triggered create_agent.
+  const parentSessions = getSessionsByAgentGroup(sourceGroup.id);
+  for (const ps of parentSessions) {
+    writeDestinations(sourceGroup.id, ps.id);
+  }
 
   // Fire-and-forget notification back to the creator
   notifyAgent(

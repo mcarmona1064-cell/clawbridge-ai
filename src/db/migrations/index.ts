@@ -12,6 +12,10 @@ import { migration012 } from './012-channel-registration.js';
 import { migration013 } from './013-approval-render-metadata.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
+import { moduleAgentRegistry } from './module-agent-registry.js';
+import { moduleAgentHealth } from './module-agent-health.js';
+import { moduleA2aRetry } from './module-a2a-retry.js';
+import { moduleFanOut } from './module-fan-out.js';
 
 export interface Migration {
   version: number;
@@ -31,6 +35,10 @@ const migrations: Migration[] = [
   migration011,
   migration012,
   migration013,
+  moduleAgentRegistry,
+  moduleAgentHealth,
+  moduleA2aRetry,
+  moduleFanOut,
 ];
 
 export function runMigrations(db: Database.Database): void {

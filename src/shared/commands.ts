@@ -34,6 +34,18 @@ const DEFINITIONS: SlashCommandDefinition[] = [
     adminOnly: false,
     description: 'Set or clear a persistent goal (/goal <target> or /goal clear)',
   },
+  {
+    command: '/agents',
+    category: 'host',
+    adminOnly: false,
+    description: 'List all agent groups and their descriptions',
+  },
+  {
+    command: '/health',
+    category: 'host',
+    adminOnly: false,
+    description: 'Show per-agent health status (error counts, last ok)',
+  },
 ];
 
 export const COMMAND_REGISTRY = Object.freeze(DEFINITIONS.map((def) => Object.freeze({ ...def })));

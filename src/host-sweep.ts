@@ -45,6 +45,15 @@ import { log } from './log.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
+import { hasTable } from './db/connection.js';
+import { getDb } from './db/connection.js';
+import {
+  getPendingDroppedA2a,
+  updateDroppedA2aRetry,
+  markDroppedA2aDelivered,
+  markDroppedA2aFailed,
+} from './db/dropped-a2a.js';
+import { getSession } from './db/sessions.js';
 import {
   MemoryManager,
   runReflectionAgent,
@@ -148,6 +157,12 @@ async function sweep(): Promise<void> {
     await runWeeklyCrossClientReport();
   } catch (err) {
     log.error('Host sweep nightly task error', { err });
+  }
+
+  try {
+    await retryDroppedA2aMessages();
+  } catch (err) {
+    log.error('Host sweep A2A retry error', { err });
   }
 
   if (running) setTimeout(sweep, SWEEP_INTERVAL_MS);
@@ -375,6 +390,65 @@ function resetStuckProcessingRows(
         tries: msg.tries,
         backoffMs,
         reason,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A2A retry — re-delivers messages that failed their initial routing attempt
+// ---------------------------------------------------------------------------
+
+const MAX_A2A_RETRIES = 4;
+const A2A_BACKOFF_MS = [30_000, 120_000, 600_000, 1_800_000]; // 30s, 2m, 10m, 30m
+
+async function retryDroppedA2aMessages(): Promise<void> {
+  if (!hasTable(getDb(), 'dropped_a2a_messages')) return;
+
+  const pending = getPendingDroppedA2a();
+  if (pending.length === 0) return;
+
+  const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
+
+  for (const row of pending) {
+    if (row.retry_count >= MAX_A2A_RETRIES) {
+      markDroppedA2aFailed(row.id);
+      log.warn('A2A retry: max retries reached, marking failed', {
+        id: row.id,
+        source: row.source_group_id,
+        target: row.target_group_id,
+      });
+      continue;
+    }
+
+    // Reconstruct a minimal session from the source group's active session
+    const sourceSession = getSession(
+      (getDb()
+        .prepare("SELECT id FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
+        .get(row.source_group_id) as { id: string } | undefined)?.id ?? '',
+    );
+    if (!sourceSession) {
+      const nextBackoff = A2A_BACKOFF_MS[Math.min(row.retry_count, A2A_BACKOFF_MS.length - 1)];
+      updateDroppedA2aRetry(row.id, row.retry_count + 1, new Date(Date.now() + nextBackoff).toISOString());
+      log.warn('A2A retry: source session not found, rescheduling', { id: row.id });
+      continue;
+    }
+
+    try {
+      await routeAgentMessage(
+        { id: row.id, platform_id: row.target_group_id, content: row.msg_content },
+        sourceSession,
+      );
+      markDroppedA2aDelivered(row.id);
+      log.info('A2A retry: delivered', { id: row.id, retryCount: row.retry_count + 1 });
+    } catch (err) {
+      const nextRetryCount = row.retry_count + 1;
+      const backoffMs = A2A_BACKOFF_MS[Math.min(nextRetryCount - 1, A2A_BACKOFF_MS.length - 1)];
+      updateDroppedA2aRetry(row.id, nextRetryCount, new Date(Date.now() + backoffMs).toISOString());
+      log.warn('A2A retry: still failing', {
+        id: row.id,
+        attempt: nextRetryCount,
+        err: (err as Error).message,
       });
     }
   }

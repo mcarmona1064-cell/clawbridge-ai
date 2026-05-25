@@ -29,6 +29,15 @@ import { inboundDbPath, resolveSession, sessionDir, writeSessionMessage } from '
 import { openInboundDb as openInboundDbWriter } from '../../db/session-db.js';
 import type { Session } from '../../types.js';
 import { hasDestination } from './db/agent-destinations.js';
+import { getDb } from '../../db/connection.js';
+import { hasTable } from '../../db/connection.js';
+import { recordAgentSuccess, recordAgentError } from '../../db/agent-health.js';
+import { insertDroppedA2a } from '../../db/dropped-a2a.js';
+import {
+  getActiveFanOutTasksForOrchestrator,
+  recordFanOutReply,
+  expireOldFanOutTasks,
+} from '../../db/fan-out-tasks.js';
 
 export interface ForwardedAttachment {
   name: string;
@@ -142,12 +151,9 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   if (!getAgentGroup(targetAgentGroupId)) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
   }
-  // Step 3b: if the outbound message carries reply_to_session (set by the child
-  // agent's MCP send_message tool when it knows it's replying to a parent),
-  // route directly to that session instead of the agent-shared session. This
-  // ensures the reply lands in the exact parent session that originated the
-  // request, even when the parent agent has multiple concurrent sessions.
-  let targetSession: Session;
+
+  // Step 3b: if the outbound message carries reply_to_session, route directly to
+  // that session rather than the agent-shared session.
   let replyToSessionId: string | null = null;
   try {
     const parsedContent = JSON.parse(msg.content) as Record<string, unknown>;
@@ -158,6 +164,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     // non-JSON content — fall through to agent-shared
   }
 
+  let targetSession: Session;
   if (replyToSessionId) {
     const directSession = getSession(replyToSessionId);
     if (directSession && directSession.agent_group_id === targetAgentGroupId) {
@@ -176,40 +183,68 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   } else {
     ({ session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared'));
   }
-  const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  // If the source message references files (via `send_file`), forward the
-  // bytes from the source's outbox into the target's inbox so the target
-  // agent can actually see and re-send them. Without this, agent-to-agent
-  // file attachments look like they arrive but the target has no way to
-  // read the bytes — they live in a session dir it doesn't mount.
+  const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const forwardedContent = forwardFileAttachments(msg, a2aMsgId, session, targetAgentGroupId, targetSession.id);
 
-  writeSessionMessage(targetAgentGroupId, targetSession.id, {
-    id: a2aMsgId,
-    kind: 'chat',
-    timestamp: new Date().toISOString(),
-    platformId: session.agent_group_id,
-    channelType: 'agent',
-    threadId: null,
-    content: forwardedContent,
-    // Step 3a: stamp the parent session so the child knows where to reply.
-    replyToSession: session.id,
-  });
+  // Deliver: write the message, wake the container, update health and fan-out state.
+  // On failure: record the error, persist the message for sweep-based retry, re-throw.
+  try {
+    writeSessionMessage(targetAgentGroupId, targetSession.id, {
+      id: a2aMsgId,
+      kind: 'chat',
+      timestamp: new Date().toISOString(),
+      platformId: session.agent_group_id,
+      channelType: 'agent',
+      threadId: null,
+      content: forwardedContent,
+      replyToSession: session.id,
+    });
 
-  // Step 5: upsert a2a_context in the child's inbound.db so MCP tools can
-  // read reply_to_session without it being threaded through every call.
-  upsertA2aContext(targetAgentGroupId, targetSession.id, session.id, session.agent_group_id);
+    upsertA2aContext(targetAgentGroupId, targetSession.id, session.id, session.agent_group_id);
 
-  log.info('Agent message routed', {
-    from: session.agent_group_id,
-    to: targetAgentGroupId,
-    targetSession: targetSession.id,
-    a2aMsgId,
-    forwardedFileCount: countForwardedFiles(forwardedContent),
-  });
-  const fresh = getSession(targetSession.id);
-  if (fresh) await wakeContainer(fresh);
+    log.info('Agent message routed', {
+      from: session.agent_group_id,
+      to: targetAgentGroupId,
+      targetSession: targetSession.id,
+      a2aMsgId,
+      forwardedFileCount: countForwardedFiles(forwardedContent),
+    });
+
+    const fresh = getSession(targetSession.id);
+    if (fresh) await wakeContainer(fresh);
+
+    recordAgentSuccess(targetAgentGroupId);
+
+    // Fan-out collection: when a child replies to the orchestrator, check if
+    // this completes a waiting fan_out_task and inject a collect message if so.
+    if (hasTable(getDb(), 'fan_out_tasks')) {
+      let replyText = msg.content;
+      try {
+        const parsed = JSON.parse(msg.content) as Record<string, unknown>;
+        if (typeof parsed.text === 'string') replyText = parsed.text;
+      } catch {
+        // non-JSON — use raw content as reply text
+      }
+      collectFanOutReply(session.agent_group_id, targetAgentGroupId, replyText, targetSession);
+    }
+  } catch (err) {
+    recordAgentError(targetAgentGroupId, (err as Error).message ?? String(err));
+    if (hasTable(getDb(), 'dropped_a2a_messages')) {
+      const dropId = `drop-${msg.id}`;
+      const nextRetry = new Date(Date.now() + 30_000).toISOString();
+      insertDroppedA2a({
+        id: dropId,
+        source_group_id: session.agent_group_id,
+        target_group_id: targetAgentGroupId,
+        msg_content: msg.content,
+        error: (err as Error).message ?? String(err),
+        next_retry_at: nextRetry,
+        created_at: new Date().toISOString(),
+      });
+    }
+    throw err;
+  }
 }
 
 /**
@@ -302,5 +337,101 @@ function countForwardedFiles(contentStr: string): number {
     return Array.isArray(parsed.attachments) ? parsed.attachments.length : 0;
   } catch {
     return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out collection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal JSON Schema validator — supports `type` (root) and `required` fields.
+ * Returns an error string on validation failure, null on success or bad schema.
+ */
+function validateSchema(text: string, schemaStr: string): string | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return 'reply is not valid JSON';
+  }
+  let schema: { type?: string; required?: string[] };
+  try {
+    schema = JSON.parse(schemaStr) as typeof schema;
+  } catch {
+    return null; // unparseable schema — skip validation
+  }
+  if (schema.type === 'object' && (typeof data !== 'object' || data === null || Array.isArray(data))) {
+    return 'expected an object';
+  }
+  if (schema.required && typeof data === 'object' && data !== null) {
+    const obj = data as Record<string, unknown>;
+    for (const key of schema.required) {
+      if (!(key in obj)) return `missing required field "${key}"`;
+    }
+  }
+  return null;
+}
+
+/**
+ * After routing a reply from sourceGroupId → orchestratorGroupId, check if
+ * any waiting fan_out_task has sourceGroupId as a target. If yes, record the
+ * reply. When all N targets have replied, inject a collect message.
+ */
+function collectFanOutReply(
+  sourceGroupId: string,
+  orchestratorGroupId: string,
+  replyText: string,
+  orchestratorSession: Session,
+): void {
+  try {
+    expireOldFanOutTasks();
+    const tasks = getActiveFanOutTasksForOrchestrator(orchestratorGroupId);
+    for (const task of tasks) {
+      const targets = JSON.parse(task.target_group_ids) as string[];
+      if (!targets.includes(sourceGroupId)) continue;
+
+      let finalReply = replyText;
+      if (task.expected_schema) {
+        const schemaError = validateSchema(replyText, task.expected_schema);
+        if (schemaError) finalReply = `[Schema validation error: ${schemaError}]\n${replyText}`;
+      }
+
+      const { allReplied, replies } = recordFanOutReply(task.id, sourceGroupId, finalReply);
+      if (!allReplied) {
+        log.info('fan-out: reply recorded, waiting for more', {
+          taskId: task.id,
+          replied: Object.keys(replies).length,
+          total: targets.length,
+        });
+        continue;
+      }
+
+      // All N replies collected — build and inject the collect message.
+      const replyLines = targets
+        .map((gid, i) => `**Agent ${i + 1} (${gid.slice(-8)}):**\n${replies[gid] ?? '(no reply)'}`)
+        .join('\n\n');
+      let collectMsg = `All ${targets.length} agents have replied:\n\n${replyLines}`;
+      if (task.collect_prompt) collectMsg += `\n\n---\n${task.collect_prompt}`;
+
+      writeSessionMessage(orchestratorSession.agent_group_id, orchestratorSession.id, {
+        id: `fo-collect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'chat',
+        timestamp: new Date().toISOString(),
+        platformId: orchestratorSession.agent_group_id,
+        channelType: 'agent',
+        threadId: null,
+        content: JSON.stringify({ text: collectMsg, sender: 'system', senderId: 'system' }),
+      });
+      const freshOrch = getSession(orchestratorSession.id);
+      if (freshOrch) {
+        wakeContainer(freshOrch).catch((err) =>
+          log.error('fan-out: failed to wake orchestrator after collect', { err }),
+        );
+      }
+      log.info('fan-out: all replies collected', { taskId: task.id, agents: targets.length });
+    }
+  } catch (err) {
+    log.error('fan-out: collectFanOutReply threw unexpectedly', { err });
   }
 }

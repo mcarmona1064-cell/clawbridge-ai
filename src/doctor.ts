@@ -387,7 +387,11 @@ async function checkSystemd(autoFix: boolean): Promise<void> {
         try {
           const isRoot = process.getuid?.() === 0;
           const prefix = isRoot ? 'systemctl' : 'systemctl --user';
-          if (!isRoot) { try { execSync('loginctl enable-linger', { stdio: 'pipe' }); } catch {} }
+          if (!isRoot) {
+            try {
+              execSync('loginctl enable-linger', { stdio: 'pipe' });
+            } catch {}
+          }
           execSync(`${prefix} restart ${unitName}`, { stdio: 'pipe' });
           pass('Systemd service', `${unitName} (restarted)`);
         } catch (e) {

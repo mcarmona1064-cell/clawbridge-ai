@@ -4,6 +4,7 @@ export interface AgentGroup {
   id: string;
   name: string;
   folder: string;
+  description?: string | null;
   agent_provider: string | null;
   created_at: string;
 }

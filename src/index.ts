@@ -103,7 +103,9 @@ async function main(): Promise<void> {
   // Self-heal: ensure loginctl linger is active on Linux so the service
   // survives SSH logout. No-op on macOS and when running as root.
   if (process.platform === 'linux' && process.getuid?.() !== 0) {
-    try { (await import('child_process')).execSync('loginctl enable-linger', { stdio: 'pipe' }); } catch {}
+    try {
+      (await import('child_process')).execSync('loginctl enable-linger', { stdio: 'pipe' });
+    } catch {}
   }
 
   // 3. Channel adapters
