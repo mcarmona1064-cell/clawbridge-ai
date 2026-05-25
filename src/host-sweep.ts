@@ -44,7 +44,7 @@ import {
 } from './db/session-db.js';
 import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { log } from './log.js';
-import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
+import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath, writeSessionMessage } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
 import { hasTable } from './db/connection.js';
@@ -56,7 +56,8 @@ import {
   markDroppedA2aFailed,
 } from './db/dropped-a2a.js';
 import { getTasksToCleanup, markEphemeralTaskCleaned } from './db/ephemeral-tasks.js';
-import { deleteAgentHealth } from './db/agent-health.js';
+import { deleteAgentHealth, getAllAgentHealth } from './db/agent-health.js';
+import { getExpiredFanOutTasksToNotify, expireOldFanOutTasks } from './db/fan-out-tasks.js';
 import { getSession } from './db/sessions.js';
 import {
   MemoryManager,
@@ -167,6 +168,18 @@ async function sweep(): Promise<void> {
     await retryDroppedA2aMessages();
   } catch (err) {
     log.error('Host sweep A2A retry error', { err });
+  }
+
+  try {
+    await cleanupExpiredFanOutTasks();
+  } catch (err) {
+    log.error('Host sweep fan-out timeout error', { err });
+  }
+
+  try {
+    await checkAgentHealthAlerts();
+  } catch (err) {
+    log.error('Host sweep agent health alert error', { err });
   }
 
   try {
@@ -391,6 +404,14 @@ function resetStuckProcessingRows(
         sessionId: session.id,
         reason,
       });
+      const agentGrp = getAgentGroup(session.agent_group_id);
+      const agentName = agentGrp?.name ?? session.agent_group_id.slice(-8);
+      sendSweepAlert(
+        `⚠️ <b>Message permanently failed: ${agentName}</b>\n\n` +
+          `Message <code>${msg.id.slice(-12)}</code> could not be processed after ${MAX_TRIES} attempts.\n` +
+          `Reason: ${reason}\n\n` +
+          `Check the agent logs — it may need a restart or manual intervention.`,
+      ).catch(() => {/* non-critical */});
     } else {
       const backoffMs = BACKOFF_BASE_MS * Math.pow(2, msg.tries);
       const backoffSec = Math.floor(backoffMs / 1000);
@@ -428,6 +449,40 @@ async function retryDroppedA2aMessages(): Promise<void> {
         source: row.source_group_id,
         target: row.target_group_id,
       });
+      // Notify source agent that the delivery permanently failed.
+      try {
+        const srcSessionRow = getDb()
+          .prepare(
+            "SELECT id FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(row.source_group_id) as { id: string } | undefined;
+        const srcSession = srcSessionRow ? getSession(srcSessionRow.id) : undefined;
+        if (srcSession) {
+          const targetGrp = getAgentGroup(row.target_group_id);
+          const targetName = targetGrp?.name ?? row.target_group_id.slice(-8);
+          writeSessionMessage(row.source_group_id, srcSession.id, {
+            id: `a2a-fail-${row.id}-${Date.now()}`,
+            kind: 'chat',
+            timestamp: new Date().toISOString(),
+            platformId: row.source_group_id,
+            channelType: 'agent',
+            threadId: null,
+            content: JSON.stringify({
+              text: `[Delivery failed — your message to "${targetName}" could not be delivered after ${MAX_A2A_RETRIES} attempts. The message has been dropped.]`,
+              sender: 'system',
+              senderId: 'system',
+            }),
+          });
+          const fresh = getSession(srcSession.id);
+          if (fresh) {
+            wakeContainer(fresh).catch((err) =>
+              log.error('A2A retry: failed to wake source after permanent failure', { err }),
+            );
+          }
+        }
+      } catch (notifyErr) {
+        log.error('A2A retry: source notification error', { id: row.id, err: notifyErr });
+      }
       continue;
     }
 
@@ -468,6 +523,131 @@ async function retryDroppedA2aMessages(): Promise<void> {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Agent health alerts
+// ---------------------------------------------------------------------------
+
+const AGENT_ERROR_THRESHOLD = 3;
+const agentAlertCooldown = new Map<string, number>(); // agentGroupId -> last alert timestamp
+
+async function sendSweepAlert(text: string): Promise<void> {
+  try {
+    const { readEnvFile } = await import('./env.js');
+    const env = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALERT_CHAT_ID', 'TELEGRAM_CHAT_ID']);
+    const token = process.env['TELEGRAM_BOT_TOKEN'] ?? env['TELEGRAM_BOT_TOKEN'] ?? '';
+    const chatId =
+      process.env['TELEGRAM_ALERT_CHAT_ID'] ??
+      env['TELEGRAM_ALERT_CHAT_ID'] ??
+      process.env['TELEGRAM_CHAT_ID'] ??
+      env['TELEGRAM_CHAT_ID'] ??
+      '';
+    if (!token || !chatId) return;
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+  } catch {
+    /* non-critical */
+  }
+}
+
+async function checkAgentHealthAlerts(): Promise<void> {
+  if (!hasTable(getDb(), 'agent_health')) return;
+  const rows = getAllAgentHealth();
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.consecutive_errors < AGENT_ERROR_THRESHOLD) continue;
+    const lastAlert = agentAlertCooldown.get(row.agent_group_id) ?? 0;
+    if (now - lastAlert < 60 * 60 * 1000) continue; // 1h cooldown
+    agentAlertCooldown.set(row.agent_group_id, now);
+    const grp = getAgentGroup(row.agent_group_id);
+    const name = grp?.name ?? row.agent_group_id.slice(-8);
+    log.warn('agent-health-alert: consecutive error threshold reached', {
+      agentGroupId: row.agent_group_id,
+      name,
+      errors: row.consecutive_errors,
+    });
+    await sendSweepAlert(
+      `⚠️ <b>Agent struggling: ${name}</b>\n\n` +
+        `${row.consecutive_errors} consecutive errors\n` +
+        `Last error: ${row.last_error ?? 'unknown'}\n\n` +
+        `Check the agent\'s logs or restart it if needed.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out timeout notifications
+// ---------------------------------------------------------------------------
+
+async function cleanupExpiredFanOutTasks(): Promise<void> {
+  if (!hasTable(getDb(), 'fan_out_tasks')) return;
+  const tasks = getExpiredFanOutTasksToNotify();
+  if (tasks.length === 0) return;
+
+  for (const task of tasks) {
+    try {
+      const replies = JSON.parse(task.replies) as Record<string, string>;
+      const targets = JSON.parse(task.target_group_ids) as string[];
+      const replied = Object.keys(replies);
+      const missing = targets.filter((id) => !(id in replies));
+
+      const replyLines = replied.map((id) => {
+        const grp = getAgentGroup(id);
+        const name = grp?.name ?? id.slice(-8);
+        const text = replies[id] ?? '';
+        return `<b>${name}</b>: ${text.length > 200 ? text.slice(0, 200) + '...' : text}`;
+      });
+      const missingNames = missing.map((id) => getAgentGroup(id)?.name ?? id.slice(-8));
+
+      let timeoutMsg = `[fan_out timed out — ${replied.length}/${targets.length} agents replied]`;
+      if (replyLines.length > 0) {
+        timeoutMsg += `\n\nPartial results:\n${replyLines.join('\n')}`;
+      }
+      if (missingNames.length > 0) {
+        timeoutMsg += `\n\nNo reply from: ${missingNames.join(', ')}`;
+      }
+
+      const orcSessionRow = getDb()
+        .prepare(
+          "SELECT id FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        )
+        .get(task.orchestrator_group_id) as { id: string } | undefined;
+      const orcSession = orcSessionRow ? getSession(orcSessionRow.id) : undefined;
+
+      if (orcSession) {
+        writeSessionMessage(task.orchestrator_group_id, orcSession.id, {
+          id: `fanout-timeout-${task.id}-${Date.now()}`,
+          kind: 'chat',
+          timestamp: new Date().toISOString(),
+          platformId: task.orchestrator_group_id,
+          channelType: 'agent',
+          threadId: null,
+          content: JSON.stringify({ text: timeoutMsg, sender: 'system', senderId: 'system' }),
+        });
+        const fresh = getSession(orcSession.id);
+        if (fresh) {
+          wakeContainer(fresh).catch((err) =>
+            log.error('fan-out timeout: failed to wake orchestrator', { err }),
+          );
+        }
+      }
+
+      log.info('fan-out: timeout notification sent to orchestrator', {
+        taskId: task.id,
+        replied: replied.length,
+        total: targets.length,
+      });
+    } catch (err) {
+      log.error('fan-out timeout notification error', { taskId: task.id, err });
+    }
+  }
+
+  expireOldFanOutTasks();
+}
+
 // ---------------------------------------------------------------------------
 // Ephemeral task cleanup
 // ---------------------------------------------------------------------------
@@ -483,6 +663,33 @@ async function cleanupEphemeralTasks(): Promise<void> {
       const taskSessions = getSessionsByAgentGroup(task.task_agent_group_id);
       for (const sess of taskSessions) {
         if (isContainerRunning(sess.id)) killContainer(sess.id, 'ephemeral-task-cleanup');
+      }
+      // For tasks that timed out without a reply, notify the caller before cleanup.
+      if (task.status === 'running') {
+        try {
+          const callerActive = getSessionsByAgentGroup(task.caller_group_id).find((s) => s.status === 'active');
+          if (callerActive) {
+            const timeoutMsg = `[Task timed out — task agent did not reply within the timeout window. Task: ${task.id.slice(-8)}]`;
+            writeSessionMessage(task.caller_group_id, callerActive.id, {
+              id: `etask-timeout-${task.id}-${Date.now()}`,
+              kind: 'chat',
+              timestamp: new Date().toISOString(),
+              platformId: task.caller_group_id,
+              channelType: 'agent',
+              threadId: null,
+              content: JSON.stringify({ text: timeoutMsg, sender: 'system', senderId: 'system' }),
+            });
+            const freshCaller = getSession(callerActive.id);
+            if (freshCaller) {
+              wakeContainer(freshCaller).catch((err) =>
+                log.error('ephemeral-task timeout: failed to wake caller', { err }),
+              );
+            }
+            log.info('Ephemeral task: timeout notification sent to caller', { taskId: task.id });
+          }
+        } catch (notifyErr) {
+          log.error('Ephemeral task timeout notification error', { taskId: task.id, err: notifyErr });
+        }
       }
       const callerSessions = getSessionsByAgentGroup(task.caller_group_id);
       deleteAllDestinationsTouching(task.task_agent_group_id);

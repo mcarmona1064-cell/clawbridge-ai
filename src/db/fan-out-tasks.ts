@@ -66,3 +66,10 @@ export function expireOldFanOutTasks(): number {
     .run(now);
   return result.changes;
 }
+
+export function getExpiredFanOutTasksToNotify(): FanOutTask[] {
+  const now = new Date().toISOString();
+  return getDb()
+    .prepare("SELECT * FROM fan_out_tasks WHERE status = 'waiting' AND expires_at < ?")
+    .all(now) as FanOutTask[];
+}
