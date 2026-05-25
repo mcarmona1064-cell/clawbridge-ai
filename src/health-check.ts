@@ -26,29 +26,8 @@ const FIX_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between fix attempts per com
 
 // ── Telegram helper (duplicated here to keep health-check self-contained) ────
 
-import { readEnvFile } from './env.js';
+import { sendAdminAlert } from './shared/admin-alert.js';
 
-const envCfg = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_ALERT_CHAT_ID']);
-
-function cfg(key: string): string {
-  return process.env[key] || envCfg[key] || '';
-}
-
-async function sendTelegramAlert(text: string): Promise<void> {
-  const token = cfg('TELEGRAM_BOT_TOKEN');
-  const chatId = cfg('TELEGRAM_ALERT_CHAT_ID') || cfg('TELEGRAM_CHAT_ID');
-  if (!token || !chatId) return;
-
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
-    });
-  } catch (err) {
-    console.error('[health-check] Failed to send Telegram alert:', err);
-  }
-}
 
 // ── Auto-heal cooldown ────────────────────────────────────────────────────────
 
@@ -340,7 +319,7 @@ export function startHealthCheck(intervalMs = 60_000): void {
             stillBroken.map((r) => `${icon(r.ok)} ${r.name}: ${r.detail ?? 'failed'}`).join('\n')
           : '');
       log.info('[health-check] Auto-heal succeeded', { fixed });
-      await sendTelegramAlert(fixedText);
+      await sendAdminAlert(fixedText);
     }
 
     if (stillBroken.length > 0) {
@@ -353,7 +332,7 @@ export function startHealthCheck(intervalMs = 60_000): void {
       log.warn('[health-check] Health check failures after auto-heal', {
         failed: stillBroken.map((r) => r.name).join(', '),
       });
-      await sendTelegramAlert(alertText);
+      await sendAdminAlert(alertText);
     }
   };
 

@@ -45,6 +45,7 @@ import {
 import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath, writeSessionMessage } from './session-manager.js';
+import { sendAdminAlert } from './shared/admin-alert.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
 import { hasTable } from './db/connection.js';
@@ -411,7 +412,9 @@ function resetStuckProcessingRows(
           `Message <code>${msg.id.slice(-12)}</code> could not be processed after ${MAX_TRIES} attempts.\n` +
           `Reason: ${reason}\n\n` +
           `Check the agent logs — it may need a restart or manual intervention.`,
-      ).catch(() => {/* non-critical */});
+      ).catch(() => {
+        /* non-critical */
+      });
     } else {
       const backoffMs = BACKOFF_BASE_MS * Math.pow(2, msg.tries);
       const backoffSec = Math.floor(backoffMs / 1000);
@@ -523,7 +526,6 @@ async function retryDroppedA2aMessages(): Promise<void> {
   }
 }
 
-
 // ---------------------------------------------------------------------------
 // Agent health alerts
 // ---------------------------------------------------------------------------
@@ -532,25 +534,7 @@ const AGENT_ERROR_THRESHOLD = 3;
 const agentAlertCooldown = new Map<string, number>(); // agentGroupId -> last alert timestamp
 
 async function sendSweepAlert(text: string): Promise<void> {
-  try {
-    const { readEnvFile } = await import('./env.js');
-    const env = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALERT_CHAT_ID', 'TELEGRAM_CHAT_ID']);
-    const token = process.env['TELEGRAM_BOT_TOKEN'] ?? env['TELEGRAM_BOT_TOKEN'] ?? '';
-    const chatId =
-      process.env['TELEGRAM_ALERT_CHAT_ID'] ??
-      env['TELEGRAM_ALERT_CHAT_ID'] ??
-      process.env['TELEGRAM_CHAT_ID'] ??
-      env['TELEGRAM_CHAT_ID'] ??
-      '';
-    if (!token || !chatId) return;
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
-    });
-  } catch {
-    /* non-critical */
-  }
+  await sendAdminAlert(text);
 }
 
 async function checkAgentHealthAlerts(): Promise<void> {
@@ -629,9 +613,7 @@ async function cleanupExpiredFanOutTasks(): Promise<void> {
         });
         const fresh = getSession(orcSession.id);
         if (fresh) {
-          wakeContainer(fresh).catch((err) =>
-            log.error('fan-out timeout: failed to wake orchestrator', { err }),
-          );
+          wakeContainer(fresh).catch((err) => log.error('fan-out timeout: failed to wake orchestrator', { err }));
         }
       }
 

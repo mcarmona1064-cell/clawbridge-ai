@@ -25,6 +25,7 @@ import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { readEnvFile } from './env.js';
+import { sendAdminAlert } from './shared/admin-alert.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -49,25 +50,9 @@ const activeContainers = new Map<string, { process: ChildProcess; containerName:
 /** Agent groups currently undergoing an auto-rebuild — prevents concurrent duplicate rebuilds. */
 const rebuildInProgress = new Set<string>();
 
-/** Send a Telegram alert when a container fails to start (image not found). */
+/** Send an admin alert when a container fails to start. Delivers to all active platforms. */
 async function sendContainerFailureAlert(hint: string): Promise<void> {
-  try {
-    const env = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALERT_CHAT_ID', 'TELEGRAM_CHAT_ID']);
-    const token = env['TELEGRAM_BOT_TOKEN'];
-    const chatId = env['TELEGRAM_ALERT_CHAT_ID'] || env['TELEGRAM_CHAT_ID'];
-    if (!token || !chatId) return;
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `⚠️ <b>ClawBridge startup error</b>\n\n${hint}`,
-        parse_mode: 'HTML',
-      }),
-    });
-  } catch {
-    /* non-critical */
-  }
+  await sendAdminAlert(`⚠️ <b>ClawBridge startup error</b>\n\n${hint}`);
 }
 
 /**
@@ -233,7 +218,10 @@ async function spawnContainer(session: Session): Promise<void> {
       // Per-agent custom image: auto-rebuild instead of just alerting
       if (!imageExists && containerConfig.imageTag && !rebuildInProgress.has(agentGroup.id)) {
         rebuildInProgress.add(agentGroup.id);
-        log.warn('Per-agent image missing: triggering auto-rebuild', { imageTag: containerConfig.imageTag, agentGroup: agentGroup.name });
+        log.warn('Per-agent image missing: triggering auto-rebuild', {
+          imageTag: containerConfig.imageTag,
+          agentGroup: agentGroup.name,
+        });
         void (async () => {
           try {
             await sendContainerFailureAlert(`🔄 Auto-rebuilding image for <b>${agentGroup.name}</b>...`);
@@ -640,7 +628,9 @@ export async function verifyAndRebuildMissingImages(): Promise<void> {
     try {
       execSync(CONTAINER_RUNTIME_BIN + ' image inspect ' + config.imageTag, { stdio: 'pipe' });
       exists = true;
-    } catch { exists = false; }
+    } catch {
+      exists = false;
+    }
     if (!exists && !rebuildInProgress.has(group.id)) {
       rebuildInProgress.add(group.id);
       log.warn('Startup: per-agent image missing, rebuilding', { agentGroup: group.name, imageTag: config.imageTag });
