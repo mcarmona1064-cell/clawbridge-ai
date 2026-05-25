@@ -11,6 +11,7 @@ import { migrateGroupsToAgentsLocal } from './agents-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
+import { verifyAndRebuildMissingImages } from './container-runner.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostExecWatcher, stopHostExecWatcher } from './modules/host-exec/index.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
   // 2. Container runtime
   ensureContainerRuntimeRunning();
   cleanupOrphans();
+  void verifyAndRebuildMissingImages();
 
   // Self-heal: ensure loginctl linger is active on Linux so the service
   // survives SSH logout. No-op on macOS and when running as root.

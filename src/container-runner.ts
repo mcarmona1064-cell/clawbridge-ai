@@ -46,6 +46,9 @@ import type { AgentGroup, Session } from './types.js';
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
 
+/** Agent groups currently undergoing an auto-rebuild — prevents concurrent duplicate rebuilds. */
+const rebuildInProgress = new Set<string>();
+
 /** Send a Telegram alert when a container fails to start (image not found). */
 async function sendContainerFailureAlert(hint: string): Promise<void> {
   try {
@@ -227,6 +230,26 @@ async function spawnContainer(session: Session): Promise<void> {
       } catch {
         imageExists = false;
       }
+      // Per-agent custom image: auto-rebuild instead of just alerting
+      if (!imageExists && containerConfig.imageTag && !rebuildInProgress.has(agentGroup.id)) {
+        rebuildInProgress.add(agentGroup.id);
+        log.warn('Per-agent image missing: triggering auto-rebuild', { imageTag: containerConfig.imageTag, agentGroup: agentGroup.name });
+        void (async () => {
+          try {
+            await sendContainerFailureAlert(`🔄 Auto-rebuilding image for <b>${agentGroup.name}</b>...`);
+            await buildAgentGroupImage(agentGroup.id);
+            await wakeContainer(session);
+            await sendContainerFailureAlert(`✅ Image rebuilt: <b>${agentGroup.name}</b> is back online`);
+          } catch (rebuildErr) {
+            const msg = rebuildErr instanceof Error ? rebuildErr.message : String(rebuildErr);
+            await sendContainerFailureAlert(`❌ Auto-rebuild failed for <b>${agentGroup.name}</b>`);
+          } finally {
+            rebuildInProgress.delete(agentGroup.id);
+          }
+        })();
+        return;
+      }
+
       const hint = !imageExists
         ? `Image "${imageTag}" not found — run: <code>clawbridge-codex build-image</code>`
         : !mountExists
@@ -599,4 +622,32 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   writeContainerConfig(agentGroup.folder, containerConfig);
 
   log.info('Per-agent-group image built', { agentGroupId, imageTag });
+}
+
+/**
+ * On startup: scan all agent groups that have a custom imageTag stored in
+ * container.json and verify the image still exists in Docker. If any are
+ * missing, trigger a background rebuild so agents come back online without
+ * manual intervention.
+ */
+export async function verifyAndRebuildMissingImages(): Promise<void> {
+  const { getAllAgentGroups } = await import('./db/agent-groups.js');
+  const groups = getAllAgentGroups();
+  for (const group of groups) {
+    const config = readContainerConfig(group.folder);
+    if (!config.imageTag) continue;
+    let exists = false;
+    try {
+      execSync(CONTAINER_RUNTIME_BIN + ' image inspect ' + config.imageTag, { stdio: 'pipe' });
+      exists = true;
+    } catch { exists = false; }
+    if (!exists && !rebuildInProgress.has(group.id)) {
+      rebuildInProgress.add(group.id);
+      log.warn('Startup: per-agent image missing, rebuilding', { agentGroup: group.name, imageTag: config.imageTag });
+      void buildAgentGroupImage(group.id)
+        .then(() => log.info('Startup rebuild complete', { agentGroup: group.name }))
+        .catch((err) => log.error('Startup rebuild failed', { agentGroup: group.name, err }))
+        .finally(() => rebuildInProgress.delete(group.id));
+    }
+  }
 }
