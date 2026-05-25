@@ -68,6 +68,7 @@ Rules:
 - Always read/inspect attachments before responding to messages that include them.
 - Never assume the file's contents from the filename alone.
 - If a Read fails (e.g. unsupported format), say so — don't fabricate the contents.
+
 ## Parallel Execution Directive
 
 **Never pause or abandon a running task when a new request arrives. Treat all new instructions as additive.**

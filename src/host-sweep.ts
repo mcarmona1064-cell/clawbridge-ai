@@ -56,6 +56,7 @@ import {
   markDroppedA2aFailed,
 } from './db/dropped-a2a.js';
 import { getTasksToCleanup, markEphemeralTaskCleaned } from './db/ephemeral-tasks.js';
+import { deleteAgentHealth } from './db/agent-health.js';
 import { getSession } from './db/sessions.js';
 import {
   MemoryManager,
@@ -467,7 +468,6 @@ async function retryDroppedA2aMessages(): Promise<void> {
   }
 }
 
-
 // ---------------------------------------------------------------------------
 // Ephemeral task cleanup
 // ---------------------------------------------------------------------------
@@ -487,14 +487,23 @@ async function cleanupEphemeralTasks(): Promise<void> {
       const callerSessions = getSessionsByAgentGroup(task.caller_group_id);
       deleteAllDestinationsTouching(task.task_agent_group_id);
       for (const cs of callerSessions) {
-        try { writeDestinations(task.caller_group_id, cs.id); } catch { /* non-critical */ }
+        try {
+          writeDestinations(task.caller_group_id, cs.id);
+        } catch {
+          /* non-critical */
+        }
       }
       for (const sess of taskSessions) deleteSession(sess.id);
+      deleteAgentHealth(task.task_agent_group_id);
       deleteAgentGroup(task.task_agent_group_id);
       fs.rmSync(path.join(GROUPS_DIR, task.task_agent_folder), { recursive: true, force: true });
       fs.rmSync(path.join(DATA_DIR, 'v2-sessions', task.task_agent_group_id), { recursive: true, force: true });
       markEphemeralTaskCleaned(task.id);
-      log.info('Ephemeral task cleaned up', { taskId: task.id, reason: task.status === 'replied' ? 'replied' : 'expired', agentGroupId: task.task_agent_group_id });
+      log.info('Ephemeral task cleaned up', {
+        taskId: task.id,
+        reason: task.status === 'replied' ? 'replied' : 'expired',
+        agentGroupId: task.task_agent_group_id,
+      });
     } catch (err) {
       log.error('Ephemeral task cleanup error', { taskId: task.id, err });
     }

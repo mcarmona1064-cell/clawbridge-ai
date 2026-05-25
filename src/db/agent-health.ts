@@ -39,3 +39,7 @@ export function recordAgentError(agentGroupId: string, error: string): void {
     )
     .run(agentGroupId, error, now);
 }
+
+export function deleteAgentHealth(agentGroupId: string): void {
+  getDb().prepare('DELETE FROM agent_health WHERE agent_group_id = ?').run(agentGroupId);
+}
