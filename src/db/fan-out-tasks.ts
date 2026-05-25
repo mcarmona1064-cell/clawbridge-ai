@@ -5,7 +5,7 @@ export interface FanOutTask {
   orchestrator_group_id: string;
   orchestrator_session_id: string;
   target_group_ids: string; // JSON array of agent_group_id strings
-  replies: string;          // JSON object: {agentGroupId: replyText}
+  replies: string; // JSON object: {agentGroupId: replyText}
   collect_prompt: string | null;
   expected_schema: string | null;
   created_at: string;

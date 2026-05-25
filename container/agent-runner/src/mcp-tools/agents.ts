@@ -154,4 +154,53 @@ export const fanOut: McpToolDefinition = {
   },
 };
 
-registerTools([createAgent, listAgents, fanOut]);
+
+export const runTask: McpToolDefinition = {
+  tool: {
+    name: 'run_task',
+    description:
+      'Spawn a temporary one-shot agent to execute a focused task and return the result. ' +
+      'The agent is automatically cleaned up after it replies. ' +
+      'Use this for parallel independent work without creating persistent agents.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'The task or question for the agent to execute',
+        },
+        role: {
+          type: 'string',
+          description: 'Optional role/specialization instructions for the temporary agent',
+        },
+        timeout_minutes: {
+          type: 'number',
+          description: 'Timeout in minutes before the task is abandoned (default: 10, max: 60)',
+        },
+      },
+      required: ['prompt'],
+    },
+  },
+  async handler(args) {
+    const prompt = args.prompt as string;
+    if (!prompt) return err('prompt is required');
+
+    const requestId = generateId();
+    writeMessageOut({
+      id: requestId,
+      kind: 'system',
+      content: JSON.stringify({
+        action: 'run_task',
+        requestId,
+        prompt,
+        role: (args.role as string) || null,
+        timeout_minutes: (args.timeout_minutes as number) || 10,
+      }),
+    });
+
+    log(`run_task: ${requestId}`);
+    return ok('Task dispatched. A temporary agent is working on it and will reply when done.');
+  },
+};
+
+registerTools([createAgent, listAgents, fanOut, runTask]);

@@ -28,9 +28,10 @@
  */
 import type Database from 'better-sqlite3';
 import fs from 'fs';
+import path from 'path';
 
-import { getActiveSessions } from './db/sessions.js';
-import { getAgentGroup } from './db/agent-groups.js';
+import { getActiveSessions, getSessionsByAgentGroup, deleteSession } from './db/sessions.js';
+import { getAgentGroup, deleteAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
   getContainerState,
@@ -41,6 +42,7 @@ import {
   syncProcessingAcks,
   type ContainerState,
 } from './db/session-db.js';
+import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
@@ -53,6 +55,7 @@ import {
   markDroppedA2aDelivered,
   markDroppedA2aFailed,
 } from './db/dropped-a2a.js';
+import { getTasksToCleanup, markEphemeralTaskCleaned } from './db/ephemeral-tasks.js';
 import { getSession } from './db/sessions.js';
 import {
   MemoryManager,
@@ -163,6 +166,12 @@ async function sweep(): Promise<void> {
     await retryDroppedA2aMessages();
   } catch (err) {
     log.error('Host sweep A2A retry error', { err });
+  }
+
+  try {
+    await cleanupEphemeralTasks();
+  } catch (err) {
+    log.error('Host sweep ephemeral task cleanup error', { err });
   }
 
   if (running) setTimeout(sweep, SWEEP_INTERVAL_MS);
@@ -423,9 +432,13 @@ async function retryDroppedA2aMessages(): Promise<void> {
 
     // Reconstruct a minimal session from the source group's active session
     const sourceSession = getSession(
-      (getDb()
-        .prepare("SELECT id FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
-        .get(row.source_group_id) as { id: string } | undefined)?.id ?? '',
+      (
+        getDb()
+          .prepare(
+            "SELECT id FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(row.source_group_id) as { id: string } | undefined
+      )?.id ?? '',
     );
     if (!sourceSession) {
       const nextBackoff = A2A_BACKOFF_MS[Math.min(row.retry_count, A2A_BACKOFF_MS.length - 1)];
@@ -450,6 +463,40 @@ async function retryDroppedA2aMessages(): Promise<void> {
         attempt: nextRetryCount,
         err: (err as Error).message,
       });
+    }
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Ephemeral task cleanup
+// ---------------------------------------------------------------------------
+
+async function cleanupEphemeralTasks(): Promise<void> {
+  if (!hasTable(getDb(), 'ephemeral_tasks')) return;
+  const tasks = getTasksToCleanup();
+  if (tasks.length === 0) return;
+  const { deleteAllDestinationsTouching } = await import('./modules/agent-to-agent/db/agent-destinations.js');
+  const { writeDestinations } = await import('./modules/agent-to-agent/write-destinations.js');
+  for (const task of tasks) {
+    try {
+      const taskSessions = getSessionsByAgentGroup(task.task_agent_group_id);
+      for (const sess of taskSessions) {
+        if (isContainerRunning(sess.id)) killContainer(sess.id, 'ephemeral-task-cleanup');
+      }
+      const callerSessions = getSessionsByAgentGroup(task.caller_group_id);
+      deleteAllDestinationsTouching(task.task_agent_group_id);
+      for (const cs of callerSessions) {
+        try { writeDestinations(task.caller_group_id, cs.id); } catch { /* non-critical */ }
+      }
+      for (const sess of taskSessions) deleteSession(sess.id);
+      deleteAgentGroup(task.task_agent_group_id);
+      fs.rmSync(path.join(GROUPS_DIR, task.task_agent_folder), { recursive: true, force: true });
+      fs.rmSync(path.join(DATA_DIR, 'v2-sessions', task.task_agent_group_id), { recursive: true, force: true });
+      markEphemeralTaskCleaned(task.id);
+      log.info('Ephemeral task cleaned up', { taskId: task.id, reason: task.status === 'replied' ? 'replied' : 'expired', agentGroupId: task.task_agent_group_id });
+    } catch (err) {
+      log.error('Ephemeral task cleanup error', { taskId: task.id, err });
     }
   }
 }

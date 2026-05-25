@@ -38,6 +38,7 @@ import {
   recordFanOutReply,
   expireOldFanOutTasks,
 } from '../../db/fan-out-tasks.js';
+import { getEphemeralTaskByAgentGroup, markEphemeralTaskReplied } from '../../db/ephemeral-tasks.js';
 
 export interface ForwardedAttachment {
   name: string;
@@ -227,6 +228,19 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
         // non-JSON — use raw content as reply text
       }
       collectFanOutReply(session.agent_group_id, targetAgentGroupId, replyText, targetSession);
+    }
+
+    // Ephemeral task: when a one-shot task agent sends its reply back, record
+    // the result so the sweep can tear down the task container and group.
+    if (hasTable(getDb(), 'ephemeral_tasks')) {
+      let ephemeralReplyText = msg.content;
+      try {
+        const ep = JSON.parse(msg.content) as Record<string, unknown>;
+        if (typeof ep.text === 'string') ephemeralReplyText = ep.text;
+      } catch {
+        // non-JSON — use raw content
+      }
+      checkEphemeralTaskReply(session.agent_group_id, ephemeralReplyText);
     }
   } catch (err) {
     recordAgentError(targetAgentGroupId, (err as Error).message ?? String(err));
@@ -433,5 +447,24 @@ function collectFanOutReply(
     }
   } catch (err) {
     log.error('fan-out: collectFanOutReply threw unexpectedly', { err });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ephemeral task reply helper
+// ---------------------------------------------------------------------------
+
+/**
+ * When sourceGroupId is an active ephemeral task agent, record its reply so
+ * the host sweep can tear down the container and group on the next tick.
+ */
+function checkEphemeralTaskReply(sourceGroupId: string, replyText: string): void {
+  try {
+    const task = getEphemeralTaskByAgentGroup(sourceGroupId);
+    if (!task) return;
+    markEphemeralTaskReplied(task.id, replyText);
+    log.info('ephemeral-task: reply received, marked for cleanup', { taskId: task.id });
+  } catch (err) {
+    log.error('ephemeral-task: checkEphemeralTaskReply threw', { err });
   }
 }

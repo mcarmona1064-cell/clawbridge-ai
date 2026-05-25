@@ -291,9 +291,7 @@ function handleHealth(_ctx: HostCommandContext, write: WriteResponse): void {
         `${g.name}  ⚠️  ${h.consecutive_errors} error${h.consecutive_errors === 1 ? '' : 's'} — last: "${h.last_error ?? 'unknown'}"`,
       );
     } else {
-      lines.push(
-        `${g.name}  ❌  ${h.consecutive_errors} errors — last: "${h.last_error ?? 'unknown'}"`,
-      );
+      lines.push(`${g.name}  ❌  ${h.consecutive_errors} errors — last: "${h.last_error ?? 'unknown'}"`);
     }
   }
 

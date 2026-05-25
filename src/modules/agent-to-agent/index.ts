@@ -18,6 +18,8 @@
 import { registerDeliveryAction } from '../../delivery.js';
 import { handleCreateAgent } from './create-agent.js';
 import { handleFanOut } from './fan-out.js';
+import { handleRunTask } from './run-task.js';
 
 registerDeliveryAction('create_agent', handleCreateAgent);
 registerDeliveryAction('fan_out', handleFanOut);
+registerDeliveryAction('run_task', handleRunTask);

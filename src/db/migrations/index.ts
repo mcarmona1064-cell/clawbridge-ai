@@ -16,6 +16,7 @@ import { moduleAgentRegistry } from './module-agent-registry.js';
 import { moduleAgentHealth } from './module-agent-health.js';
 import { moduleA2aRetry } from './module-a2a-retry.js';
 import { moduleFanOut } from './module-fan-out.js';
+import { moduleEphemeralTasks } from './module-ephemeral-tasks.js';
 
 export interface Migration {
   version: number;
@@ -39,6 +40,7 @@ const migrations: Migration[] = [
   moduleAgentHealth,
   moduleA2aRetry,
   moduleFanOut,
+  moduleEphemeralTasks,
 ];
 
 export function runMigrations(db: Database.Database): void {

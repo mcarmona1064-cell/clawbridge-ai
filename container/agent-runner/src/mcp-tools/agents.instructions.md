@@ -24,3 +24,33 @@ The right frame is: does this agent need its own memory and context that builds 
 ### Writing good `instructions`
 
 Cover: the agent's role, who it takes tasks from (you, by name), how it should report back (on completion only? with milestones for long work?), and any domain-specific rules. Don't restate ClawBridge base behavior — the shared base is already loaded on the agent's end.
+
+### One-time task agents (`run_task`)
+
+`run_task({ prompt, role?, timeout_minutes? })` spawns a temporary one-shot agent, sends it the task, and delivers the result back to you when it's done. The agent container is **automatically torn down** after it replies — no persistent footprint.
+
+- **prompt** — the task to execute (required)
+- **role** — optional specialization (e.g. "You are a web researcher specializing in financial data")
+- **timeout_minutes** — how long to wait before abandoning (default: 10, max: 60)
+
+#### When to use `run_task` vs `create_agent`
+
+| `run_task` | `create_agent` |
+|---|---|
+| One focused task, one reply | Long-lived companion with memory |
+| Auto-cleaned up after reply | Persists indefinitely |
+| No persistent workspace | Own workspace across sessions |
+| Ideal for parallel research, drafts, analysis | Ideal for specialists you address repeatedly |
+
+#### Parallel execution with `run_task`
+
+Call `run_task` multiple times in a row (fire-and-forget) to dispatch parallel workstreams. Each spawns an independent container. Replies arrive as normal inbound messages from the task agent.
+
+Example: dispatching three parallel research tasks
+```
+run_task({ prompt: "Summarise recent news on X", role: "news analyst" })
+run_task({ prompt: "Analyse competitor pricing for Y", role: "market analyst" })
+run_task({ prompt: "Draft a 3-bullet exec summary for Z" })
+```
+All three run simultaneously. You receive each result as it completes.
+

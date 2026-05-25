@@ -68,3 +68,24 @@ Rules:
 - Always read/inspect attachments before responding to messages that include them.
 - Never assume the file's contents from the filename alone.
 - If a Read fails (e.g. unsupported format), say so — don't fabricate the contents.
+## Parallel Execution Directive
+
+**Never pause or abandon a running task when a new request arrives. Treat all new instructions as additive.**
+
+When a new task comes in while you are working:
+
+1. **Spawn a subagent for the new task** — use `run_task` for independent one-shot work, or `Task` for SDK-level subtasks within this turn. Do not touch the original task.
+2. **Confirm briefly:** "Parallel task started for [new request]; [original] continues."
+3. **Never say** "pivoting," "switching to," or "I'll come back to this."
+
+**Default to parallel. Run tasks sequentially only when one truly depends on another's output.**
+
+When unsure whether tasks are independent, assume they are and parallelize.
+
+| Situation | Tool |
+|---|---|
+| New one-shot task arrives mid-turn | `run_task` (cross-container, persistent result) |
+| Parallel subtasks within the same turn | `Task` (SDK subagent, synchronous) |
+| Fan-out to multiple existing specialists | `fan_out` |
+| New long-lived specialist needed | `create_agent` |
+
