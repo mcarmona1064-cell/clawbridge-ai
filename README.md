@@ -17,6 +17,15 @@
 
 ---
 
+## Built by Mark Carmona
+
+ClawBridge Codex is an open-source AI agent platform designed and maintained by [Mark Carmona](https://markcarmona.online/), an AI Automation & AI Agent Engineer in the Philippines specializing in self-hosted agents, OpenClaw, multi-agent orchestration, and workflow automation.
+
+The project includes public TypeScript source, Docker-based agent isolation, OpenAI Codex integration, Hindsight memory, multi-channel adapters, health-check tooling, release history, and architecture documentation.
+
+- [Project case study](https://markcarmona.online/projects/clawbridge-codex/)
+- [About Mark Carmona](https://markcarmona.online/about/mark-carmona/)
+
 ## Why I Built ClawBridge
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level rather than true OS-level isolation.
