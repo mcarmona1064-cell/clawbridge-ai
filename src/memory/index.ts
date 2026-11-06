@@ -7,7 +7,15 @@ export { embed, keywordSimilarity, cosineSimilarity } from './embeddings.js';
 export type { Memory, MemorySegment, MemoryQueryResult } from './types.js';
 
 // Memory scope (which bank a session may use)
-export { memoryScopeForSession, memoryScopesForSessions } from './scope.js';
+export {
+  memoryScopeForSession,
+  memoryScopesForSessions,
+  originForSession,
+  provenanceTags,
+  readableScopesForSession,
+  teamScopeForAgentGroup,
+} from './scope.js';
+export type { MemoryOrigin } from './scope.js';
 
 // Hindsight integration
 export {
@@ -18,6 +26,7 @@ export {
   isHindsightAvailable,
   bankId,
   recallToSessionFile,
+  recallFromScopes,
   retainTurn,
   MEMORY_CONTEXT_FILENAME,
 } from './hindsight.js';

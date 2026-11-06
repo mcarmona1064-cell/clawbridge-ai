@@ -41,6 +41,12 @@ const DEFINITIONS: SlashCommandDefinition[] = [
     description: 'List all agent groups and their descriptions',
   },
   {
+    command: '/teamfact',
+    category: 'host',
+    adminOnly: true,
+    description: 'Save a fact to team memory, shared by every conversation of this agent (/teamfact <fact>)',
+  },
+  {
     command: '/provider',
     category: 'host',
     adminOnly: true,

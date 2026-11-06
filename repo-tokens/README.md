@@ -12,7 +12,7 @@ A GitHub Action that calculates the size of your codebase in terms of tokens and
 ## Usage
 
 ```yaml
-- uses: mcarmona1064-cell/clawbridge-codex/repo-tokens@v1
+- uses: mcarmona1064-cell/clawbridge-ai/repo-tokens@v1
   with:
     include: 'src/**/*.ts'
     exclude: 'src/**/*.test.ts'
@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: mcarmona1064-cell/clawbridge-codex/repo-tokens@v1
+      - uses: mcarmona1064-cell/clawbridge-ai/repo-tokens@v1
         id: tokens
         with:
           include: 'src/**/*.ts'

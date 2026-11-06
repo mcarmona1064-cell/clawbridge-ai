@@ -6,8 +6,8 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline';
 
-const PACKAGE_NAME = 'clawbridge-codex';
-const CLI_NAME = 'clawbridge-codex';
+const PACKAGE_NAME = 'clawbridge-ai';
+const CLI_NAME = 'clawbridge-ai';
 const REGISTRY_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 
 export async function checkForUpdate(): Promise<void> {
@@ -29,7 +29,7 @@ export async function checkForUpdate(): Promise<void> {
 
     if (latestVersion !== currentVersion) {
       console.log(`\n⚡ ClawBridge update available: ${currentVersion} → ${latestVersion}`);
-      console.log(`   Run: clawbridge-codex upgrade\n`);
+      console.log(`   Run: clawbridge-ai upgrade\n`);
     }
   } catch {
     // Silently ignore — no network, npm down, etc.
@@ -96,7 +96,7 @@ function rebuildContainerImage(): boolean {
       timeout: 5 * 60 * 1000, // 5 minutes
     });
     if (result.status !== 0) {
-      console.log('  \u26a0  Container image build failed. Run manually: clawbridge-codex build-image');
+      console.log('  \u26a0  Container image build failed. Run manually: clawbridge-ai build-image');
       return false;
     }
     return true;
@@ -288,7 +288,7 @@ export async function runUpgrade(): Promise<void> {
         restartSystemdService(systemdUnit, systemdScope);
       }
     }
-    console.error('\n✗ Upgrade failed. Try manually: npm install -g clawbridge-codex@latest');
+    console.error('\n✗ Upgrade failed. Try manually: npm install -g clawbridge-ai@latest');
     process.exit(1);
   }
 
@@ -326,7 +326,7 @@ export async function runUpgrade(): Promise<void> {
     const { runDoctor } = await import('./doctor.js');
     await runDoctor();
   } catch {
-    console.log('  ⚠  Could not run health check — run `clawbridge-codex doctor` manually.');
+    console.log('  ⚠  Could not run health check — run `clawbridge-ai doctor` manually.');
   }
 
   console.log(`\n✓ ClawBridge upgraded: ${currentVersion} → ${latestVersion}`);

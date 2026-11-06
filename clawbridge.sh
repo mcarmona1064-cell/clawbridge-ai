@@ -23,7 +23,7 @@ set -euo pipefail
 
 # ─── bootstrap: if running via bash <(curl ...) re-exec from a durable clone ───
 if [[ "${BASH_SOURCE[0]}" == /dev/fd/* ]] || [[ ! -f "${BASH_SOURCE[0]%/*}/setup/lib/diagnostics.sh" ]]; then
-  CLONE_DIR="${CLAWBRIDGE_SOURCE_DIR:-$HOME/.local/share/clawbridge-codex/source}"
+  CLONE_DIR="${CLAWBRIDGE_SOURCE_DIR:-$HOME/.local/share/clawbridge-ai/source}"
   echo "Downloading ClawBridge..."
   if [ -d "$CLONE_DIR/.git" ]; then
     git -C "$CLONE_DIR" fetch --depth 1 origin main --quiet
@@ -31,7 +31,7 @@ if [[ "${BASH_SOURCE[0]}" == /dev/fd/* ]] || [[ ! -f "${BASH_SOURCE[0]%/*}/setup
   else
     rm -rf "$CLONE_DIR"
     mkdir -p "$(dirname "$CLONE_DIR")"
-    git clone --depth 1 --quiet https://github.com/mcarmona1064-cell/clawbridge-codex.git "$CLONE_DIR"
+    git clone --depth 1 --quiet https://github.com/mcarmona1064-cell/clawbridge-ai.git "$CLONE_DIR"
   fi
   exec bash "$CLONE_DIR/clawbridge.sh" "$@"
 fi

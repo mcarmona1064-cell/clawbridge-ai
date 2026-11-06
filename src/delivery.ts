@@ -23,7 +23,7 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
-import { memoryScopeForSession, retainTurn } from './memory/index.js';
+import { memoryScopeForSession, originForSession, provenanceTags, retainTurn } from './memory/index.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
@@ -221,9 +221,17 @@ async function drainSession(session: Session): Promise<void> {
             const userText = extractText(userContent);
             const agentText = extractText(msg.content);
             if (userText && agentText) {
-              void retainTurn(memoryScopeForSession(session), userText, agentText, { sessionId: session.id }).catch(
-                (err) => log.warn('[hindsight] retainTurn threw', { sessionId: session.id, err }),
-              );
+              // Provenance is stamped by the host from the messaging group,
+              // never chosen by the model.
+              const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+              const extraTags = provenanceTags({
+                origin: originForSession(session, mg),
+                messagingGroupId: session.messaging_group_id,
+              });
+              void retainTurn(memoryScopeForSession(session), userText, agentText, {
+                sessionId: session.id,
+                extraTags,
+              }).catch((err) => log.warn('[hindsight] retainTurn threw', { sessionId: session.id, err }));
             }
           }
         }

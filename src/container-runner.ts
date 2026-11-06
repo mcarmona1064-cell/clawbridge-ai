@@ -240,9 +240,9 @@ async function spawnContainer(session: Session): Promise<void> {
       }
 
       const hint = !imageExists
-        ? `Image "${imageTag}" not found — run: <code>clawbridge-codex build-image</code>`
+        ? `Image "${imageTag}" not found — run: <code>clawbridge-ai build-image</code>`
         : !mountExists
-          ? `Mount path not found — reinstall: <code>npm install -g clawbridge-codex@latest</code>`
+          ? `Mount path not found — reinstall: <code>npm install -g clawbridge-ai@latest</code>`
           : 'Docker runtime error — check: <code>docker ps</code>';
       log.error('Container spawn failed (exit 125)', { hint });
       void sendContainerFailureAlert(hint);

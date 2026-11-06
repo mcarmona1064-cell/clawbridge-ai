@@ -2,7 +2,7 @@
 /**
  * ClawBridge interactive setup wizard.
  *
- * Entry point for `npx clawbridge-codex` and `pnpm run setup:wizard`.
+ * Entry point for `npx clawbridge-ai` and `pnpm run setup:wizard`.
  *
  * Three paths:
  *   1. Fresh install  — guided .env generation + docker compose up
@@ -39,20 +39,20 @@ import {
 import { checkForUpdate, runUpgrade } from '../updater.js';
 import { getContainerImageBase, getDefaultContainerImage, getLaunchdLabel, getSystemdUnit } from '../install-slug.js';
 
-// Handle "clawbridge-codex doctor" command
+// Handle "clawbridge-ai doctor" command
 if (process.argv[2] === 'doctor') {
   const { runDoctor } = await import('../doctor.js');
   await runDoctor();
   process.exit(0);
 }
 
-// Handle "clawbridge-codex upgrade" / "clawbridge-codex update" command
+// Handle "clawbridge-ai upgrade" / "clawbridge-ai update" command
 if (process.argv[2] === 'upgrade' || process.argv[2] === 'update') {
   await runUpgrade();
   process.exit(0);
 }
 
-// Handle "clawbridge-codex chat" command
+// Handle "clawbridge-ai chat" command
 if (process.argv[2] === 'chat') {
   const { main: startChat } = await import('../cli-chat.js');
   await startChat();
@@ -759,7 +759,7 @@ async function runFreshInstall(): Promise<void> {
     } catch {
       /* */
     }
-    checks.push({ label: 'Agent image', ok: imageOk, fix: 'run: clawbridge-codex build-image' });
+    checks.push({ label: 'Agent image', ok: imageOk, fix: 'run: clawbridge-ai build-image' });
 
     // Hindsight
     let hindsightOk = false;
@@ -778,7 +778,7 @@ async function runFreshInstall(): Promise<void> {
         encoding: 'utf-8',
         timeout: 3000,
       });
-      checks.push({ label: 'Launchd service', ok: launchCheck.status === 0, fix: 'run: clawbridge-codex doctor' });
+      checks.push({ label: 'Launchd service', ok: launchCheck.status === 0, fix: 'run: clawbridge-ai doctor' });
     } else {
       const unit = getSystemdUnit(packageRootForCheck);
       const svcCheck = spawnSync('systemctl', ['--user', 'is-active', unit], {
@@ -786,7 +786,7 @@ async function runFreshInstall(): Promise<void> {
         encoding: 'utf-8',
         timeout: 3000,
       });
-      checks.push({ label: 'Systemd service', ok: svcCheck.status === 0, fix: 'run: clawbridge-codex doctor' });
+      checks.push({ label: 'Systemd service', ok: svcCheck.status === 0, fix: 'run: clawbridge-ai doctor' });
     }
 
     hs.stop('Setup verification:');
@@ -1081,7 +1081,7 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
     try {
       fs.symlinkSync(srcCompose, destCompose);
     } catch {
-      p.log.warn('docker-compose.yml symlink failed — run: clawbridge-codex doctor --fix');
+      p.log.warn('docker-compose.yml symlink failed — run: clawbridge-ai doctor --fix');
     }
   }
 
@@ -1242,7 +1242,7 @@ async function buildContainerImageWithRetry(): Promise<boolean> {
         await p.confirm({ message: 'Docker Desktop started? Retry image build?', initialValue: true }),
       ) as boolean;
       if (!retry) {
-        p.log.warn('⚠️  Image not built — run: clawbridge-codex build-image once Docker is running');
+        p.log.warn('⚠️  Image not built — run: clawbridge-ai build-image once Docker is running');
         return false;
       }
       continue;
@@ -1250,7 +1250,7 @@ async function buildContainerImageWithRetry(): Promise<boolean> {
 
     const retry = ensure(await p.confirm({ message: 'Image build failed. Retry?', initialValue: true })) as boolean;
     if (!retry) {
-      p.log.warn('⚠️  Image not built — run: clawbridge-codex build-image to finish setup');
+      p.log.warn('⚠️  Image not built — run: clawbridge-ai build-image to finish setup');
       return false;
     }
   }
@@ -1283,11 +1283,11 @@ async function buildContainerImage(): Promise<boolean> {
     } else {
       s.stop(k.red('Image build failed.'));
       if (result.stderr) console.error(result.stderr);
-      p.log.warn('To retry: clawbridge-codex build-image');
+      p.log.warn('To retry: clawbridge-ai build-image');
       return false;
     }
   } catch (err) {
-    p.log.warn(`Image build error — run: clawbridge-codex build-image
+    p.log.warn(`Image build error — run: clawbridge-ai build-image
 ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }

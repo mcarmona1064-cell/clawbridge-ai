@@ -26,7 +26,7 @@ ClawBridgeは同じコア機能を提供しますが、理解できる規模の�
 ## クイックスタート
 
 ```bash
-git clone https://github.com/mcarmona1064-cell/clawbridge-codex.git clawbridge-codex
+git clone https://github.com/mcarmona1064-cell/clawbridge-ai.git clawbridge-ai
 cd clawbridge-v2
 bash clawbridge.sh
 ```

@@ -207,7 +207,7 @@ function checkContainerImage(autoFix: boolean): void {
       }
     }
 
-    const imageTag = slug ? `clawbridge-codex-v2-${slug}:latest` : getDefaultContainerImage();
+    const imageTag = slug ? `clawbridge-ai-v2-${slug}:latest` : getDefaultContainerImage();
 
     const r = spawnSync('docker', ['image', 'inspect', imageTag], {
       encoding: 'utf-8',
@@ -217,7 +217,7 @@ function checkContainerImage(autoFix: boolean): void {
     if (r.status === 0) {
       pass('Agent image', imageTag);
     } else {
-      const buildCmd = 'clawbridge-codex build-image';
+      const buildCmd = 'clawbridge-ai build-image';
       if (autoFix) {
         try {
           const pkgDir = path.dirname(fileURLToPath(import.meta.url));
@@ -274,7 +274,7 @@ function checkLaunchd(autoFix: boolean): void {
       .readdirSync(launchAgentsDir)
       .filter((f) => f.startsWith('com.clawbridge-v2-') && f.endsWith('.plist'));
     if (plists.length === 0) {
-      fail('LaunchD service', 'no com.clawbridge-v2-* plist found', 'run: clawbridge-codex');
+      fail('LaunchD service', 'no com.clawbridge-v2-* plist found', 'run: clawbridge-ai');
       return;
     }
     const label = plists[0].replace(/\.plist$/, '');
@@ -369,11 +369,7 @@ async function checkSystemd(autoFix: boolean): Promise<void> {
     }
 
     if (!unitName) {
-      return fail(
-        'Systemd service',
-        'No ClawBridge systemd unit found',
-        'run: clawbridge-codex to register the service',
-      );
+      return fail('Systemd service', 'No ClawBridge systemd unit found', 'run: clawbridge-ai to register the service');
     }
 
     // Check if active
@@ -436,7 +432,7 @@ function checkDockerComposeSymlink(autoFix: boolean): void {
       fail(
         'docker-compose',
         'exists but is NOT a symlink — compose drift risk',
-        'run: clawbridge-codex upgrade to re-link',
+        'run: clawbridge-ai upgrade to re-link',
       );
     }
   } catch {
@@ -449,10 +445,10 @@ function checkDockerComposeSymlink(autoFix: boolean): void {
         fs.symlinkSync(composeSrc, composeDest);
         pass('docker-compose.yml symlink', 'created');
       } catch (e) {
-        fail('docker-compose', `${dim(destPath.replace(os.homedir(), '~'))} not found`, 'run: clawbridge-codex');
+        fail('docker-compose', `${dim(destPath.replace(os.homedir(), '~'))} not found`, 'run: clawbridge-ai');
       }
     } else {
-      fail('docker-compose', `${dim(destPath.replace(os.homedir(), '~'))} not found`, 'run: clawbridge-codex');
+      fail('docker-compose', `${dim(destPath.replace(os.homedir(), '~'))} not found`, 'run: clawbridge-ai');
     }
   }
 }
@@ -461,7 +457,7 @@ function checkConfigFile(env: Map<string, string>): void {
   const envPath = path.join(os.homedir(), '.clawbridge', '.env');
   const exists = fs.existsSync(envPath);
   if (!exists) {
-    fail('Config file', `~/.clawbridge/.env not found`, 'run: clawbridge-codex');
+    fail('Config file', `~/.clawbridge/.env not found`, 'run: clawbridge-ai');
     return;
   }
   pass('Config file', `~/.clawbridge/.env`);
@@ -753,7 +749,7 @@ async function checkChannels(env: Map<string, string>, autoFix: boolean): Promis
   ].some((k) => env.get(k));
 
   if (!hasAnyChannel) {
-    console.log(`  ${dim('No channels configured — run: clawbridge-codex')}`);
+    console.log(`  ${dim('No channels configured — run: clawbridge-ai')}`);
     return;
   }
 

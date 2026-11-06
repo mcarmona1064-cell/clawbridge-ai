@@ -51,7 +51,7 @@ sysctl net.inet.ip.forwarding
 # Expected: net.inet.ip.forwarding: 1
 
 # Test container internet access
-container run --rm --entrypoint curl clawbridge-codex:latest \
+container run --rm --entrypoint curl clawbridge-ai:latest \
   -s4 --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.openai.com
 # Expected: 404
 

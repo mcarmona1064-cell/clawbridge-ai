@@ -1,5 +1,5 @@
 {
-  "name": "clawbridge-codex",
+  "name": "clawbridge-ai",
   "version": "2.11.4",
   "description": "AI agent platform for ClawBridge Agency, powered by OpenAI Codex. Self-hosted, secure, customizable.",
   "type": "module",
@@ -8,9 +8,9 @@
   "author": "ClawBridge",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mcarmona1064-cell/clawbridge-codex.git"
+    "url": "https://github.com/mcarmona1064-cell/clawbridge-ai.git"
   },
-  "homepage": "https://github.com/mcarmona1064-cell/clawbridge-codex",
+  "homepage": "https://github.com/mcarmona1064-cell/clawbridge-ai",
   "files": [
     "dist",
     "container",
@@ -43,7 +43,7 @@
     "white-label"
   ],
   "bin": {
-    "clawbridge-codex": "./dist/setup/index.js"
+    "clawbridge-ai": "./dist/setup/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -65,7 +65,7 @@
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "node -e \"try{require('better-sqlite3')}catch(e){console.error('\\n⚠ ClawBridge needs build tools for the database driver.\\nRun: apt install -y python3 make g++ (Ubuntu/Debian) or yum install -y python3 make gcc-c++ (CentOS)\\nThen: npm install -g clawbridge-codex\\n')}\""
+    "postinstall": "node -e \"try{require('better-sqlite3')}catch(e){console.error('\\n⚠ ClawBridge needs build tools for the database driver.\\nRun: apt install -y python3 make g++ (Ubuntu/Debian) or yum install -y python3 make gcc-c++ (CentOS)\\nThen: npm install -g clawbridge-ai\\n')}\""
   },
   "dependencies": {
     "@clack/core": "^1.2.0",

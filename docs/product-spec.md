@@ -99,6 +99,8 @@ channel event ──► host router ──► identity: person + channel + visib
 - **Visibility of a message's origin:** `dm:<person>`, `private:<messaging_group>`, `public:<messaging_group>`. Derived from `messaging_groups.is_group` plus channel membership where the platform exposes it.
 - **What an asker may see:** their own DMs, private groups they belong to, all public groups, and workspace memory. Runs with no person behind them (crons, webhooks) never read DMs.
 
+> **Status (2026-11-06):** implemented: per-conversation Hindsight banks with host-stamped provenance (`src/memory/scope.ts`), and an approved team bank per agent group (`src/modules/team-memory/`: `propose_team_memory` → admin card → write; `/teamfact` for admins). Still to build: people identities across channels, personal-notes and channel-instruction files, and public-vs-private channel visibility.
+
 ### 4.2 Memory layers (host files under `data/memory/`)
 
 | Layer | Path | Loaded | Cap | Written by |

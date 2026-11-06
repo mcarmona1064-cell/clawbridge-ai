@@ -5,7 +5,7 @@
 ### Interactive wizard (recommended)
 
 ```bash
-npx clawbridge-codex
+npx clawbridge-ai
 ```
 
 Or from a local checkout:
@@ -47,7 +47,7 @@ Success output:
 ## Migrate from OpenClaw or NanoClaw
 
 ```bash
-npx clawbridge-codex
+npx clawbridge-ai
 # → select the migration path
 ```
 
@@ -67,8 +67,8 @@ Migration code may detect legacy provider env vars so it can import older instal
 ## Health Checks and Repair
 
 ```bash
-clawbridge-codex doctor
-clawbridge-codex doctor --fix
+clawbridge-ai doctor
+clawbridge-ai doctor --fix
 ```
 
 `doctor` checks Docker, service registration, config, Codex auth, Hindsight, channels, DB state, compose symlink, and the agent image.
@@ -80,12 +80,12 @@ clawbridge-codex doctor --fix
 ## Upgrade
 
 ```bash
-clawbridge-codex upgrade
+clawbridge-ai upgrade
 # or
-clawbridge-codex update
+clawbridge-ai update
 ```
 
-Upgrade checks npm for the latest `clawbridge-codex` release, stops the running service, installs the latest package, refreshes the compose symlink, rebuilds the agent image, restarts the service, and runs `doctor`.
+Upgrade checks npm for the latest `clawbridge-ai` release, stops the running service, installs the latest package, refreshes the compose symlink, rebuilds the agent image, restarts the service, and runs `doctor`.
 
 Your `~/.clawbridge` data, messages, and memories are preserved.
 
@@ -104,6 +104,6 @@ Your `~/.clawbridge` data, messages, and memories are preserved.
 ## Troubleshooting
 
 - Start Docker Desktop or Docker Engine, then rerun setup or `doctor --fix`.
-- If Codex auth fails, run `codex login --device-auth` manually and rerun `clawbridge-codex doctor`.
-- If the compose symlink is missing, run `clawbridge-codex doctor --fix`.
-- If an upgrade fails, retry with `npm install -g clawbridge-codex@latest` and then `clawbridge-codex doctor --fix`.
+- If Codex auth fails, run `codex login --device-auth` manually and rerun `clawbridge-ai doctor`.
+- If the compose symlink is missing, run `clawbridge-ai doctor --fix`.
+- If an upgrade fails, retry with `npm install -g clawbridge-ai@latest` and then `clawbridge-ai doctor --fix`.

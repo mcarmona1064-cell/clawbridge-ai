@@ -11,7 +11,7 @@ Host (macOS / Windows WSL)
     │   ├── Channel adapters (WhatsApp, Telegram, etc.)
     │   └── Container spawner → nested Docker daemon
     └── Docker-in-Docker
-        └── clawbridge-codex containers
+        └── clawbridge-ai containers
             └── Codex CLI
 ```
 
@@ -77,7 +77,7 @@ ClawBridge must live inside the workspace directory — Docker-in-Docker can onl
 ```bash
 # Clone to home first (virtiofs can corrupt git pack files during clone)
 cd ~
-git clone https://github.com/mcarmona1064-cell/clawbridge-codex.git
+git clone https://github.com/mcarmona1064-cell/clawbridge-ai.git
 
 # Replace with YOUR workspace path (the host path you passed to `docker sandbox create`)
 WORKSPACE=/Users/you/clawbridge-workspace
@@ -316,7 +316,7 @@ npm config set strict-ssl false
 docker build \
   --build-arg http_proxy=$http_proxy \
   --build-arg https_proxy=$https_proxy \
-  -t clawbridge-codex:latest container/
+  -t clawbridge-ai:latest container/
 ```
 
 ### Agent containers fail with "path not shared"
@@ -347,7 +347,7 @@ docker sandbox network proxy <sandbox-name> \
 ### Git clone fails with "inflate: data stream error"
 Clone to a non-workspace path first, then move:
 ```bash
-cd ~ && git clone https://github.com/mcarmona1064-cell/clawbridge-codex.git && mv clawbridge-codex /path/to/workspace/clawbridge-codex
+cd ~ && git clone https://github.com/mcarmona1064-cell/clawbridge-ai.git && mv clawbridge-ai /path/to/workspace/clawbridge-ai
 ```
 
 ### WhatsApp QR code doesn't display

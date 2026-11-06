@@ -105,7 +105,7 @@ HINDSIGHT_API_CONSOLIDATION_LLM_MODEL=gpt-5.4-mini
 HINDSIGHT_API_REFLECT_LLM_MODEL=gpt-5.4-mini
 ```
 
-`clawbridge-codex doctor --fix` normalizes these values when Hindsight is enabled.
+`clawbridge-ai doctor --fix` normalizes these values when Hindsight is enabled.
 
 ---
 
@@ -120,7 +120,27 @@ client-{agentGroupId}--internal             # agent-to-agent and system runs (ne
 
 The scope comes from `memoryScopeForSession()` in `src/memory/scope.ts`. Because a DM is its own messaging group, something said in one person's DM can never be recalled in a channel, in another DM, or by another agent group. Reads also require the scope tag with `all_strict`, so untagged memories never match.
 
-Sharing knowledge across conversations is intentionally not automatic. It will need host-stamped visibility and an explicit promotion step; see `docs/product-spec.md` §4.
+### Team memory (shared across an agent group's conversations)
+
+Each agent group also has one **team bank**, `client-{agentGroupId}--team`, which every conversation of that group reads (recalled under "Team knowledge", ahead of "This conversation"). Nothing is retained into it automatically. A fact gets in only through an explicit promotion:
+
+1. The agent calls the `propose_team_memory` MCP tool with one sentence and its source.
+2. The host (`src/modules/team-memory/`) sends an Approve/Reject card to an admin, showing the exact fact and where it was learned (a private DM, a group chat, or an internal run).
+3. On Approve, the host writes `fact (as of YYYY-MM-DD, source: …)` to the team bank. On Reject, nothing is written.
+
+Admins can also add a fact directly with `/teamfact <fact>`; issuing the command counts as the approval.
+
+### Provenance
+
+The host, never the model, stamps provenance tags on every memory:
+
+| Tag | Meaning |
+|---|---|
+| `origin:dm` / `origin:group` / `origin:internal` / `origin:admin` | Where it came from, judged from the messaging group (unknown groups count as `dm`) |
+| `conversation:<messagingGroupId>` | Which conversation it was learned in |
+| `proposed_by:…`, `approved_by:…` | Team facts: who proposed and who approved it |
+
+Facts in the team bank carry their date and source in the text, so the agent can judge whether they are still fresh.
 
 Banks are created automatically on first use. Memories retained before this change sit in the old shared `client-global` bank and are no longer recalled.
 
@@ -169,10 +189,10 @@ Then confirm the mount exists inside the container:
 docker exec hindsight-api test -f /home/hindsight/.codex/auth.json && echo ok
 ```
 
-**Hindsight not healthy after `clawbridge-codex upgrade`:**
+**Hindsight not healthy after `clawbridge-ai upgrade`:**
 
 ```bash
 cd ~/.clawbridge && docker compose pull hindsight-api && docker compose up -d hindsight-api
 ```
 
-**Run `clawbridge-codex doctor --fix`** to check Hindsight health and normalize Codex OAuth provider settings.
+**Run `clawbridge-ai doctor --fix`** to check Hindsight health and normalize Codex OAuth provider settings.

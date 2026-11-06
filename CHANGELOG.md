@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — ClawBridge AI
+
+### Breaking changes
+- **Renamed the package and CLI to `clawbridge-ai`** (was `clawbridge-codex`). The command is now `clawbridge-ai`, and the quick-start clone dir is `~/.local/share/clawbridge-ai/source`. Service labels (`com.clawbridge-v2-*`, `clawbridge-v2-*`) and the data dir (`~/.clawbridge`) are unchanged.
+- **The agent image is now named `clawbridge-ai-v2-<slug>`.** Existing installs need one rebuild after upgrading: `clawbridge-ai build-image`, or `clawbridge-ai doctor --fix`.
+- **Hindsight memory is scoped per conversation.** Previously every turn went into one shared `client-global` bank and was recalled everywhere. Memories in `client-global` are no longer recalled.
+
+### Added
+- Claude and Codex providers in one image, switchable per agent group or session with `/provider`.
+- Team memory: a shared bank per agent group that only takes facts approved through `propose_team_memory` or added with `/teamfact`, with host-stamped provenance tags.
+
+### Changed
+- `@vectorize-io/hindsight-client` 0.5.4 → 1.2.0; the Hindsight server image is pinned to `1.2.0`.
+
 ## v3.0.0-codex.0 — 2026-05-14
 
 **Fork**: `clawbridge-agent` → `clawbridge-codex`. Repository moved to

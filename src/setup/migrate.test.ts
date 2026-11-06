@@ -17,7 +17,7 @@ async function loadMigrateWithHome(home: string) {
   return import('./migrate.js');
 }
 
-describe('clawbridge-codex migration detection', () => {
+describe('clawbridge-ai migration detection', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();

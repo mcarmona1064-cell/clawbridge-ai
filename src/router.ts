@@ -35,7 +35,7 @@ import { log } from './log.js';
 import { resolveSession, sessionDir, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
 import { getSession } from './db/sessions.js';
-import { memoryScopeForSession, recallToSessionFile } from './memory/index.js';
+import { readableScopesForSession, recallToSessionFile } from './memory/index.js';
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
 
@@ -565,10 +565,11 @@ async function deliverToAgent(
     // the container's prompt builder. Fire-and-forget; never block delivery.
     const queryText = safeParseContent(event.message.content).text ?? '';
     if (queryText) {
-      // Scoped per conversation (agent group + messaging group) so a DM or
-      // another channel's memories can never be recalled here.
+      // Reads only this conversation's bank plus the agent group's approved
+      // team facts, so a DM or another channel's memories can never be
+      // recalled here.
       void recallToSessionFile(
-        memoryScopeForSession(session),
+        readableScopesForSession(session),
         sessionDir(session.agent_group_id, session.id),
         queryText,
         {

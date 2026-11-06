@@ -17,7 +17,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # Derive the image name from the project root so two ClawBridge installs on the
-# same host don't overwrite each other's `clawbridge-codex:latest` tag. Matches
+# same host don't overwrite each other's `clawbridge-ai:latest` tag. Matches
 # setup/lib/install-slug.sh + src/install-slug.ts.
 # shellcheck source=../setup/lib/install-slug.sh
 source "$PROJECT_ROOT/setup/lib/install-slug.sh"

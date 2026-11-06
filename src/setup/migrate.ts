@@ -6,7 +6,7 @@
  *   - NanoClaw            (~/.nanoclaw)
  *   - clawbridge-agent    (~/.clawbridge with a non-codex AGENT_PROVIDER) —
  *                         in-place provider swap; data dir is shared with
- *                         clawbridge-codex, so this is just a config flip.
+ *                         clawbridge-ai, so this is just a config flip.
  */
 import fs from 'fs';
 import path from 'path';
@@ -140,7 +140,7 @@ export async function detectInstall(preferredType?: MigrationSourceType): Promis
         if (detected) return { type: detected, path: candidate };
 
         // Most candidate paths are type-signaling by directory name, but
-        // ~/.clawbridge is also the destination data dir for clawbridge-codex.
+        // ~/.clawbridge is also the destination data dir for clawbridge-ai.
         // Do not treat it as a legacy clawbridge-agent source unless
         // identifyType() confirmed a non-codex AGENT_PROVIDER.
         if (type === 'clawbridge') continue;
@@ -750,7 +750,7 @@ export async function runMigration(
     scheduledTasksMigrated: 0,
   };
 
-  // clawbridge-agent → clawbridge-codex is an in-place migration: source is
+  // clawbridge-agent → clawbridge-ai is an in-place migration: source is
   // the same ~/.clawbridge/ data dir we'd be migrating *into*. No copies
   // needed. Flip the legacy AGENT_PROVIDER marker to codex (so this install
   // is no longer detected as clawbridge-agent) and carry the old provider
@@ -775,7 +775,7 @@ export async function runMigration(
       }
       fs.writeFileSync(envPath, envContent, 'utf-8');
     }
-    emit('provider-swap', 'Done. Re-run `clawbridge-codex setup` (or restart the service) to pick up the new image.');
+    emit('provider-swap', 'Done. Re-run `clawbridge-ai setup` (or restart the service) to pick up the new image.');
     return result;
   }
 

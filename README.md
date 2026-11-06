@@ -25,7 +25,7 @@ ClawBridge Codex is an open-source AI agent platform designed and maintained by 
 
 The project includes public TypeScript source, Docker-based agent isolation, OpenAI Codex integration, Hindsight memory, multi-channel adapters, health-check tooling, release history, and architecture documentation.
 
-- [Project case study](https://markcarmona.online/projects/clawbridge-codex/)
+- [Project case study](https://markcarmona.online/projects/clawbridge-ai/)
 - [About Mark Carmona](https://markcarmona.online/about/mark-carmona/)
 
 ## Why I Built ClawBridge
@@ -37,7 +37,7 @@ ClawBridge keeps the useful parts — message routing, persistent context, chann
 ## Quick Start
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mcarmona1064-cell/clawbridge-codex/main/clawbridge.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mcarmona1064-cell/clawbridge-ai/main/clawbridge.sh)
 ```
 
 One command checks/install prerequisites where supported, then launches the interactive setup wizard.
@@ -45,13 +45,13 @@ One command checks/install prerequisites where supported, then launches the inte
 If you already have Node installed:
 
 ```bash
-npx clawbridge-codex
+npx clawbridge-ai
 ```
 
 If installed globally:
 
 ```bash
-clawbridge-codex
+clawbridge-ai
 ```
 
 To migrate from an existing OpenClaw or NanoClaw install, choose the migration path in the setup wizard.
@@ -109,7 +109,7 @@ Host-side helper calls (memory extraction, reflection, error diagnosis) go throu
 Setup is interactive by default:
 
 ```bash
-clawbridge-codex
+clawbridge-ai
 ```
 
 During setup ClawBridge:
@@ -127,13 +127,13 @@ During setup ClawBridge:
 Run a health check any time:
 
 ```bash
-clawbridge-codex doctor
+clawbridge-ai doctor
 ```
 
 Run auto-fix mode for repairable problems:
 
 ```bash
-clawbridge-codex doctor --fix
+clawbridge-ai doctor --fix
 ```
 
 `doctor --fix` can restart the background service, start Hindsight containers, rebuild a missing agent image, recreate the docker-compose symlink, restart channel connections, and normalize Hindsight model settings.
@@ -141,18 +141,18 @@ clawbridge-codex doctor --fix
 Upgrade to the latest release:
 
 ```bash
-clawbridge-codex upgrade
+clawbridge-ai upgrade
 # or
-clawbridge-codex update
+clawbridge-ai update
 ```
 
-Upgrade checks npm for the latest version, stops the running service, installs the latest `clawbridge-codex` package, refreshes the compose symlink, rebuilds the agent image, restarts the service, and runs `doctor`. Your `~/.clawbridge` data, conversations, and memories are preserved.
+Upgrade checks npm for the latest version, stops the running service, installs the latest `clawbridge-ai` package, refreshes the compose symlink, rebuilds the agent image, restarts the service, and runs `doctor`. Your `~/.clawbridge` data, conversations, and memories are preserved.
 
 ## Memory and Hindsight
 
 Every agent group has persistent files, including `AGENTS.local.md`, Codex session state, and conversation history. For semantic memory, setup can enable Hindsight. Hindsight runs as host-side Docker services (`hindsight-api` and `hindsight-db`), not inside the agent container. The host retrieves memory and injects relevant context into each agent turn.
 
-If Hindsight is configured, `clawbridge-codex doctor` checks the containers and `/health`; `doctor --fix` can start the containers and normalize Hindsight to the `openai-codex` provider. Hindsight reads OpenAI Codex OAuth from `~/.codex/auth.json` via a read-only Docker mount, so retain/recall/reflect use the same Codex subscription auth path as the agent instead of `OPENAI_API_KEY` billing.
+If Hindsight is configured, `clawbridge-ai doctor` checks the containers and `/health`; `doctor --fix` can start the containers and normalize Hindsight to the `openai-codex` provider. Hindsight reads OpenAI Codex OAuth from `~/.codex/auth.json` via a read-only Docker mount, so retain/recall/reflect use the same Codex subscription auth path as the agent instead of `OPENAI_API_KEY` billing.
 
 ## Philosophy
 
@@ -255,15 +255,15 @@ Yes. Use `/add-ollama-provider` for local open-weight models via Ollama.
 Start with:
 
 ```bash
-clawbridge-codex doctor
-clawbridge-codex doctor --fix
+clawbridge-ai doctor
+clawbridge-ai doctor --fix
 ```
 
 Doctor checks Docker, the background service, Codex auth, Hindsight, channels, storage, and the agent image. If a check still fails, inspect logs under `~/.clawbridge/logs/`.
 
 **Why isn't setup working for me?**
 
-Re-run setup after fixing the reported prerequisite, or run `clawbridge-codex doctor --fix` for repairable issues. Common fixes are starting Docker Desktop, re-running `codex login --device-auth`, or restarting the launchd/systemd service.
+Re-run setup after fixing the reported prerequisite, or run `clawbridge-ai doctor --fix` for repairable issues. Common fixes are starting Docker Desktop, re-running `codex login --device-auth`, or restarting the launchd/systemd service.
 
 ## Contributing
 

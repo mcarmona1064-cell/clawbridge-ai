@@ -136,6 +136,8 @@ export async function hindsightRetain(
     documentId?: string;
     async?: boolean;
     timestamp?: Date;
+    /** Host-stamped provenance tags (see provenanceTags() in scope.ts). */
+    extraTags?: string[];
   } = {},
 ): Promise<void> {
   if (!(await isHindsightAvailable())) return;
@@ -144,7 +146,10 @@ export async function hindsightRetain(
     await getHindsightClient().retain(bankId(clientSlug), content, {
       context: opts.context ?? 'clawbridge-session',
       documentId: opts.documentId,
-      tags: buildTags({ clientSlug, userId: opts.userId, sessionId: opts.sessionId, segment: opts.segment }),
+      tags: [
+        ...buildTags({ clientSlug, userId: opts.userId, sessionId: opts.sessionId, segment: opts.segment }),
+        ...(opts.extraTags ?? []),
+      ],
       timestamp: opts.timestamp?.toISOString() ?? new Date().toISOString(),
       async: opts.async ?? true,
     });
@@ -182,6 +187,8 @@ export async function hindsightRecall(
     budget?: 'low' | 'mid' | 'high';
     maxTokens?: number;
     types?: Array<'world' | 'experience' | 'observation'>;
+    /** Return the recalled text without the "## Memory Context" heading. */
+    raw?: boolean;
   } = {},
 ): Promise<string> {
   if (!(await isHindsightAvailable())) return '';
@@ -206,7 +213,7 @@ export async function hindsightRecall(
     if (!text.trim()) return '';
 
     log.debug('[hindsight] Recalled', { client: clientSlug, results: response.results.length });
-    return `## Memory Context\n${text}`;
+    return opts.raw ? text : `## Memory Context\n${text}`;
   } catch (e) {
     if (e instanceof HindsightError) {
       log.error('[hindsight] recall failed', { status: e.statusCode, message: e.message });
@@ -228,7 +235,7 @@ export async function hindsightRecall(
  * errors (logs and returns).
  */
 export async function recallToSessionFile(
-  clientSlug: string,
+  scopes: string | string[],
   sessionDirPath: string,
   query: string,
   opts: { userId?: string; sessionId?: string; maxTokens?: number } = {},
@@ -236,7 +243,7 @@ export async function recallToSessionFile(
   const target = path.join(sessionDirPath, MEMORY_CONTEXT_FILENAME);
 
   try {
-    const text = await hindsightRecall(clientSlug, query, opts);
+    const text = await recallFromScopes(Array.isArray(scopes) ? scopes : [scopes], query, opts);
     if (!text) {
       // Clear any stale file from a prior turn so the container doesn't
       // silently use last-turn's recall.
@@ -259,6 +266,32 @@ export async function recallToSessionFile(
   }
 }
 
+/** Section heading for a scope's recalled memories. */
+function scopeHeading(scope: string): string {
+  return scope.endsWith('--team')
+    ? '### Team knowledge (approved, shared across conversations)'
+    : '### This conversation';
+}
+
+/**
+ * Recall from several banks (e.g. team bank + conversation bank) and merge
+ * them into one memory-context block, one labelled section per bank. Each
+ * bank is queried on its own with its own all_strict scope tag.
+ */
+export async function recallFromScopes(
+  scopes: string[],
+  query: string,
+  opts: { userId?: string; sessionId?: string; maxTokens?: number } = {},
+): Promise<string> {
+  const perScopeTokens = opts.maxTokens ? Math.max(500, Math.floor(opts.maxTokens / scopes.length)) : undefined;
+  const sections: string[] = [];
+  for (const scope of scopes) {
+    const text = await hindsightRecall(scope, query, { ...opts, maxTokens: perScopeTokens, raw: true });
+    if (text.trim()) sections.push(`${scopeHeading(scope)}\n${text.trim()}`);
+  }
+  return sections.length ? `## Memory Context\n\n${sections.join('\n\n')}` : '';
+}
+
 /**
  * Retain a single conversation turn (user message + agent reply) into the
  * client's Hindsight bank. Fire-and-forget; never throws. Skips when
@@ -269,7 +302,7 @@ export async function retainTurn(
   clientSlug: string,
   userText: string,
   agentText: string,
-  opts: { userId?: string; sessionId?: string } = {},
+  opts: { userId?: string; sessionId?: string; extraTags?: string[] } = {},
 ): Promise<void> {
   const u = userText.trim();
   const a = agentText.trim();
@@ -285,6 +318,7 @@ export async function retainTurn(
       userId: opts.userId,
       sessionId: opts.sessionId,
       context: 'clawbridge-turn',
+      extraTags: opts.extraTags,
     });
     log.info('[hindsight] turn retained', { sessionId: opts.sessionId, chars: turn.length });
   } catch (err) {

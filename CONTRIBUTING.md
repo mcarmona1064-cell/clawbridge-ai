@@ -4,8 +4,8 @@
 
 1. **Check for existing work.** Search open PRs and issues before starting:
    ```bash
-   gh pr list --repo mcarmona1064-cell/clawbridge-codex --search "<your feature>"
-   gh issue list --repo mcarmona1064-cell/clawbridge-codex --search "<your feature>"
+   gh pr list --repo mcarmona1064-cell/clawbridge-ai --search "<your feature>"
+   gh issue list --repo mcarmona1064-cell/clawbridge-ai --search "<your feature>"
    ```
    If a related PR or issue exists, build on it rather than duplicating effort.
 
@@ -43,7 +43,7 @@ Add capabilities to ClawBridge by merging a git branch. The SKILL.md contains se
 3. Codex walks through interactive setup (env vars, bot creation, etc.)
 
 **Contributing a feature skill:**
-1. Fork `mcarmona1064-cell/clawbridge-codex` and branch from `main`
+1. Fork `mcarmona1064-cell/clawbridge-ai` and branch from `main`
 2. Make the code changes (new files, modified source, updated `package.json`, etc.)
 3. Add a SKILL.md in `skills/<name>/` with setup instructions — step 1 should be merging the branch
 4. Open a PR. We'll create the `skill/<name>` branch from your work

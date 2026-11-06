@@ -74,7 +74,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     const quickStart = read('clawbridge.sh');
     expect(quickStart).not.toMatch(/pnpm\s+(?:--silent\s+)?run\s+setup:auto\b/);
     expect(quickStart).toMatch(/exec\s+pnpm\s+(?:--silent\s+)?run\s+setup:wizard\b/);
-    expect(quickStart).toContain('$HOME/.local/share/clawbridge-codex/source');
+    expect(quickStart).toContain('$HOME/.local/share/clawbridge-ai/source');
   });
 
   it('configures Hindsight to use OpenAI Codex OAuth instead of OpenAI API keys', () => {
@@ -102,7 +102,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     expect(hindsightDocs).not.toMatch(/claude-code|CLAUDE_CODE_OAUTH_TOKEN|sk-ant|bare OpenAI API key/i);
   });
 
-  it('keeps active command hints on clawbridge-codex names', () => {
+  it('keeps active command hints on clawbridge-ai names', () => {
     const activeHintFiles = [
       'src/doctor.ts',
       'src/container-runner.ts',
@@ -115,7 +115,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     ];
 
     const forbiddenHint =
-      /(?:run:\s*|Run:\s*|retry:\s*|reinstall:\s*|npm install -g\s+)(?:npx\s+)?(?:clawbridge-agent(?:@latest)?|clawbridge\b(?!-codex))/;
+      /(?:run:\s*|Run:\s*|retry:\s*|reinstall:\s*|npm install -g\s+)(?:npx\s+)?(?:clawbridge-agent(?:@latest)?|clawbridge\b(?!-ai))/;
 
     for (const rel of activeHintFiles) {
       const content = read(rel);
@@ -231,7 +231,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
         /(recallToSessionFile|retainTurn|hindsightReflect|hindsightRecall|hindsightRetain)\(\s*'global'/,
       );
     }
-    expect(read('src/router.ts')).toMatch(/recallToSessionFile\(\s*memoryScopeForSession\(session\)/);
+    expect(read('src/router.ts')).toMatch(/recallToSessionFile\(\s*readableScopesForSession\(session\)/);
     expect(read('src/delivery.ts')).toMatch(/retainTurn\(\s*memoryScopeForSession\(session\)/);
 
     const hindsight = read('src/memory/hindsight.ts');
@@ -245,8 +245,8 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
 
   it('keeps upgrade/update pointed at the codex package', () => {
     const updater = read('src/updater.ts');
-    expect(updater).toContain("PACKAGE_NAME = 'clawbridge-codex'");
-    expect(updater).toContain("CLI_NAME = 'clawbridge-codex'");
+    expect(updater).toContain("PACKAGE_NAME = 'clawbridge-ai'");
+    expect(updater).toContain("CLI_NAME = 'clawbridge-ai'");
     expect(updater).not.toMatch(/clawbridge-agent\/latest|clawbridge-agent@latest|globalRoot, 'clawbridge-agent'/);
   });
 });

@@ -69,7 +69,7 @@ Entry format:
 
 === [2026-04-22T22:15:00Z] container [92.4s] → success ===
   runtime: docker
-  image: clawbridge-codex:latest
+  image: clawbridge-ai:latest
   build_ok: true
   raw: logs/setup-steps/03-container.log
 ```

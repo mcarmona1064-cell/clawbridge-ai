@@ -78,10 +78,10 @@ You are ${agentName}, a self-hosted AI agent platform built on ClawBridge. You h
 
 ## CLI commands
 
-- \`clawbridge-codex setup\` — initial setup wizard
-- \`clawbridge-codex doctor\` — health check (add --fix to auto-repair channel issues)
-- \`clawbridge-codex upgrade\` — update to latest version + rebuild container
-- \`clawbridge-codex chat\` — this CLI chat session
+- \`clawbridge-ai setup\` — initial setup wizard
+- \`clawbridge-ai doctor\` — health check (add --fix to auto-repair channel issues)
+- \`clawbridge-ai upgrade\` — update to latest version + rebuild container
+- \`clawbridge-ai chat\` — this CLI chat session
 
 Customize your persona by editing ~/.clawbridge/AGENTS.md`;
 

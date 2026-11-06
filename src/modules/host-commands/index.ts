@@ -16,6 +16,7 @@ import { getPendingApproval, getPendingApprovalsByDeliveryChannel, updateSession
 import { getDb, hasTable } from '../../db/connection.js';
 import { isContainerRunning, killContainer, resolveProviderName } from '../../container-runner.js';
 import { notifyAgent } from '../approvals/index.js';
+import { saveTeamFact, validateTeamFact } from '../team-memory/index.js';
 import { dispatchResponse } from '../../response-registry.js';
 import type { InboundEvent } from '../../channels/adapter.js';
 import type { Session, MessagingGroup, AgentGroup } from '../../types.js';
@@ -62,6 +63,8 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return handleHealth(ctx, write);
       case '/provider':
         return handleProvider(ctx, write);
+      case '/teamfact':
+        return await handleTeamFact(ctx, write);
       default:
         write('Unknown host command: ' + ctx.command);
     }
@@ -234,7 +237,7 @@ async function handleUpdate(ctx: HostCommandContext, write: WriteResponse): Prom
     };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch('https://registry.npmjs.org/clawbridge-codex/latest', {
+    const res = await fetch('https://registry.npmjs.org/clawbridge-ai/latest', {
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -363,6 +366,28 @@ function handleProvider(ctx: HostCommandContext, write: WriteResponse): void {
     note += ' The running agent was stopped and will restart on your next message.';
   }
   write(note);
+}
+
+/**
+ * /teamfact <fact> — an admin saves a fact straight to the agent group's team
+ * memory. Issuing the command is the approval; provenance records the admin
+ * and the conversation it was issued from.
+ */
+async function handleTeamFact(ctx: HostCommandContext, write: WriteResponse): Promise<void> {
+  const checked = validateTeamFact(ctx.args);
+  if (!checked.ok) {
+    write(`Usage: /teamfact <fact> (${checked.error})`);
+    return;
+  }
+  await saveTeamFact({
+    agentGroupId: ctx.agentGroup.id,
+    fact: checked.fact,
+    origin: 'admin',
+    messagingGroupId: ctx.mg.id,
+    proposedBy: ctx.userId,
+    approvedBy: ctx.userId,
+  });
+  write(`Saved to team memory for "${ctx.agentGroup.name}": ${checked.fact}`);
 }
 
 function timeSince(iso: string): string {

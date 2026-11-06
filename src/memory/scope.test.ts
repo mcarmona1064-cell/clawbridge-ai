@@ -45,8 +45,15 @@ vi.stubGlobal(
   vi.fn(async () => ({ ok: true }) as Response),
 );
 
-import { hindsightRecall, retainTurn } from './hindsight.js';
-import { memoryScopeForSession, memoryScopesForSessions } from './scope.js';
+import { hindsightRecall, hindsightRetain, recallFromScopes, retainTurn } from './hindsight.js';
+import {
+  memoryScopeForSession,
+  memoryScopesForSessions,
+  originForSession,
+  provenanceTags,
+  readableScopesForSession,
+  teamScopeForAgentGroup,
+} from './scope.js';
 
 const dmAlice = { agent_group_id: 'ag-1', messaging_group_id: 'mg-dm-alice' };
 const dmBob = { agent_group_id: 'ag-1', messaging_group_id: 'mg-dm-bob' };
@@ -103,5 +110,51 @@ describe('scoped recall (leak canary)', () => {
     store.push({ bank: `client-${scope.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`, content: 'untagged', tags: [] });
     expect(await hindsightRecall(scope, 'anything')).toBe('');
     expect(recallCalls.at(-1)).toMatchObject({ tags: [`client:${scope}`], tagsMatch: 'all_strict' });
+  });
+});
+
+describe('team memory scoping', () => {
+  async function approveTeamFact(agentGroupId: string, fact: string) {
+    await hindsightRetain(teamScopeForAgentGroup(agentGroupId), fact, {
+      extraTags: provenanceTags({ origin: 'group', messagingGroupId: 'mg-general', approvedBy: 'slack:U1' }),
+    });
+  }
+
+  it('reads the team bank from every conversation of the same agent group, never another group', async () => {
+    await approveTeamFact('ag-1', 'invoices go out on the 3rd of each month');
+    for (const session of [dmAlice, dmBob, general, internal]) {
+      expect(await recallFromScopes(readableScopesForSession(session), 'invoices')).toContain('Team knowledge');
+    }
+    expect(await recallFromScopes(readableScopesForSession(otherGroup), 'invoices')).toBe('');
+  });
+
+  it('keeps conversation memories out of the team bank: a DM turn is never shared without approval', async () => {
+    await retainTurn(memoryScopeForSession(dmAlice), SECRET, 'Understood, I will remember that.', { sessionId: 's-1' });
+    const fromChannel = await recallFromScopes(readableScopesForSession(general), 'salary');
+    expect(fromChannel).toBe('');
+    const fromOwnDm = await recallFromScopes(readableScopesForSession(dmAlice), 'salary');
+    expect(fromOwnDm).toContain('### This conversation');
+    expect(fromOwnDm).not.toContain('Team knowledge');
+  });
+
+  it('labels each bank in the merged memory context', async () => {
+    await approveTeamFact('ag-1', 'the launch checklist lives in Notion');
+    await retainTurn(
+      memoryScopeForSession(general),
+      'remember the launch is on Friday this week',
+      'Noted: launch Friday.',
+      {
+        sessionId: 's-2',
+      },
+    );
+    const ctx = await recallFromScopes(readableScopesForSession(general), 'launch');
+    expect(ctx.indexOf('Team knowledge')).toBeLessThan(ctx.indexOf('This conversation'));
+  });
+
+  it('derives origin from the messaging group, defaulting to the most private', () => {
+    expect(originForSession(general, { is_group: 1 })).toBe('group');
+    expect(originForSession(dmAlice, { is_group: 0 })).toBe('dm');
+    expect(originForSession(dmAlice, undefined)).toBe('dm');
+    expect(originForSession(internal, undefined)).toBe('internal');
   });
 });
