@@ -224,6 +224,25 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     expect(codexProvider).toContain("delete out['CODEX_API_KEY']");
   });
 
+  it('scopes Hindsight memory per conversation and pins the server version', () => {
+    for (const rel of ['src/router.ts', 'src/delivery.ts', 'src/host-sweep.ts']) {
+      const content = read(rel);
+      expect(content, rel).not.toMatch(
+        /(recallToSessionFile|retainTurn|hindsightReflect|hindsightRecall|hindsightRetain)\(\s*'global'/,
+      );
+    }
+    expect(read('src/router.ts')).toMatch(/recallToSessionFile\(\s*memoryScopeForSession\(session\)/);
+    expect(read('src/delivery.ts')).toMatch(/retainTurn\(\s*memoryScopeForSession\(session\)/);
+
+    const hindsight = read('src/memory/hindsight.ts');
+    expect(hindsight).not.toContain("tagsMatch: 'any_strict'");
+    expect(hindsight).toContain("tagsMatch: 'all_strict'");
+
+    const compose = read('integrations/docker-compose.yml');
+    expect(compose).toMatch(/ghcr\.io\/vectorize-io\/hindsight:\d+\.\d+\.\d+/);
+    expect(compose).not.toContain('vectorize-io/hindsight:latest');
+  });
+
   it('keeps upgrade/update pointed at the codex package', () => {
     const updater = read('src/updater.ts');
     expect(updater).toContain("PACKAGE_NAME = 'clawbridge-codex'");

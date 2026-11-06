@@ -2,10 +2,14 @@
  * Hindsight memory client for ClawBridge.
  *
  * Wraps @vectorize-io/hindsight-client with:
- * - Per-client bank isolation (client-{slug} naming)
+ * - Hard bank isolation: one bank per memory scope (client-{slug}). Callers
+ *   pass `memoryScopeForSession(session)` (see scope.ts), which gives each
+ *   conversation its own bank, so a DM can never be recalled elsewhere.
  * - 7-segment tagging (segment:identity, segment:preference, etc.)
  * - Graceful degradation — falls back silently if Hindsight is unavailable
- * - Strict tag matching (any_strict) to prevent cross-client data leakage
+ * - Defense in depth on reads: recall/reflect require the scope tag with
+ *   `all_strict`, so untagged or foreign-scope memories never match even if
+ *   they ended up in the bank.
  */
 
 import fs from 'fs';
@@ -75,6 +79,11 @@ export function buildTags(opts: {
   if (opts.sessionId) tags.push(`session:${opts.sessionId}`);
   if (opts.segment) tags.push(`segment:${opts.segment}`);
   return tags;
+}
+
+/** Read-side filter: only the scope tag, so every recalled memory belongs to this scope. */
+export function scopeTags(clientSlug: string): string[] {
+  return [`client:${clientSlug}`];
 }
 
 // ── Availability check ────────────────────────────────────────────────────────
@@ -180,10 +189,13 @@ export async function hindsightRecall(
   const truncatedQuery = query.length > MAX_RECALL_QUERY_CHARS ? query.slice(0, MAX_RECALL_QUERY_CHARS) : query;
 
   try {
-    const tags = buildTags({ clientSlug, userId: opts.userId });
+    // Scope tag only, matched with all_strict: a memory must carry this
+    // scope's tag, and untagged memories are excluded. (any_strict with a
+    // shared tag would match the whole bank.)
+    const tags = scopeTags(clientSlug);
     const response = await getHindsightClient().recall(bankId(clientSlug), truncatedQuery, {
       tags,
-      tagsMatch: 'any_strict', // CRITICAL: prevents cross-client data leakage
+      tagsMatch: 'all_strict',
       budget: opts.budget ?? 'mid',
       maxTokens: opts.maxTokens ?? 3000,
       types: opts.types ?? (['observation', 'world'] as string[]),
@@ -300,10 +312,10 @@ export async function hindsightReflect(
   if (!(await isHindsightAvailable())) return '';
 
   try {
-    const tags = buildTags({ clientSlug, userId: opts.userId });
+    const tags = scopeTags(clientSlug);
     const response = await getHindsightClient().reflect(bankId(clientSlug), query, {
       tags,
-      tagsMatch: 'any_strict',
+      tagsMatch: 'all_strict',
       budget: opts.budget ?? 'mid',
     });
 

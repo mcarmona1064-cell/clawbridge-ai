@@ -49,6 +49,13 @@ import { recallToSessionFile, retainTurn, MEMORY_CONTEXT_FILENAME } from './hind
 
 const TEST_DIR = path.join(os.tmpdir(), `clawbridge-hindsight-test-${process.pid}-${Date.now()}`);
 
+// isHindsightAvailable() probes `${HINDSIGHT_URL}/health` with fetch (not the
+// client), so stub fetch to report a healthy server.
+vi.stubGlobal(
+  'fetch',
+  vi.fn(async () => ({ ok: true }) as Response),
+);
+
 beforeEach(() => {
   fs.mkdirSync(TEST_DIR, { recursive: true });
   recallMock.mockReset();

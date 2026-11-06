@@ -29,7 +29,7 @@ This keeps memory and channel credentials out of untrusted agent sandboxes.
 
 ```text
 host receives message
-  → recall(query=message, bank=client-{agentGroupId})
+  → recall(query=message, bank=client-{agentGroupId}--{messagingGroupId}, tags=[scope], all_strict)
   → inject top-k results into the agent context
   → wake container
 ```
@@ -39,14 +39,14 @@ host receives message
 ```text
 container turn completes
   → host delivers response
-  → retain(content=turn_summary, bank=client-{agentGroupId})
+  → retain(content=turn_summary, bank=client-{agentGroupId}--{messagingGroupId})
 ```
 
 ### 3. Reflect during host sweep
 
 ```text
 host sweep
-  → reflect(bank=client-{agentGroupId})
+  → reflect(bank) for each active conversation's bank (capped per evening)
 ```
 
 Reflect consolidates redundant memories, promotes important facts, and prunes stale entries.
@@ -109,15 +109,24 @@ HINDSIGHT_API_REFLECT_LLM_MODEL=gpt-5.4-mini
 
 ---
 
-## Bank Naming
+## Bank Naming and Scoping
 
-Each registered agent group gets its own isolated memory bank:
+Every **conversation** gets its own isolated memory bank, one per agent group and messaging group:
 
 ```text
-client-{agentGroupId}
+client-{agentGroupId}--{messagingGroupId}   # a channel, group chat, or one person's DM
+client-{agentGroupId}--internal             # agent-to-agent and system runs (never DM content)
 ```
 
-Banks are created automatically on first use.
+The scope comes from `memoryScopeForSession()` in `src/memory/scope.ts`. Because a DM is its own messaging group, something said in one person's DM can never be recalled in a channel, in another DM, or by another agent group. Reads also require the scope tag with `all_strict`, so untagged memories never match.
+
+Sharing knowledge across conversations is intentionally not automatic. It will need host-stamped visibility and an explicit promotion step; see `docs/product-spec.md` §4.
+
+Banks are created automatically on first use. Memories retained before this change sit in the old shared `client-global` bank and are no longer recalled.
+
+## Version
+
+The server image is pinned in `integrations/docker-compose.yml` (`ghcr.io/vectorize-io/hindsight:1.2.0`) to match `@vectorize-io/hindsight-client` in `package.json`. Bump both together.
 
 ---
 

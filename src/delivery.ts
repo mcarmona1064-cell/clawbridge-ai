@@ -23,7 +23,7 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
-import { retainTurn } from './memory/index.js';
+import { memoryScopeForSession, retainTurn } from './memory/index.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
@@ -221,8 +221,8 @@ async function drainSession(session: Session): Promise<void> {
             const userText = extractText(userContent);
             const agentText = extractText(msg.content);
             if (userText && agentText) {
-              void retainTurn('global', userText, agentText, { sessionId: session.id }).catch((err) =>
-                log.warn('[hindsight] retainTurn threw', { sessionId: session.id, err }),
+              void retainTurn(memoryScopeForSession(session), userText, agentText, { sessionId: session.id }).catch(
+                (err) => log.warn('[hindsight] retainTurn threw', { sessionId: session.id, err }),
               );
             }
           }

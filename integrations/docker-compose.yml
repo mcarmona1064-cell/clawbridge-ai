@@ -26,7 +26,8 @@ services:
       retries: 5
 
   hindsight-api:
-    image: ghcr.io/vectorize-io/hindsight:latest
+    # Pinned to match @vectorize-io/hindsight-client in package.json. Bump both together.
+    image: ghcr.io/vectorize-io/hindsight:1.2.0
     platform: linux/amd64
     container_name: hindsight-api
     restart: unless-stopped

@@ -6,6 +6,9 @@ export { generateCrossClientReport } from './cross-client.js';
 export { embed, keywordSimilarity, cosineSimilarity } from './embeddings.js';
 export type { Memory, MemorySegment, MemoryQueryResult } from './types.js';
 
+// Memory scope (which bank a session may use)
+export { memoryScopeForSession, memoryScopesForSessions } from './scope.js';
+
 // Hindsight integration
 export {
   hindsightRetain,

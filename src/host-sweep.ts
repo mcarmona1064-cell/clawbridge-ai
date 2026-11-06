@@ -65,6 +65,7 @@ import {
   runReflectionAgent,
   generateCrossClientReport,
   hindsightReflect,
+  memoryScopesForSessions,
   isHindsightAvailable,
 } from './memory/index.js';
 
@@ -130,6 +131,8 @@ export function decideStuckAction(args: {
 let running = false;
 let lastDecayDate = ''; // YYYY-MM-DD of last nightly decay run
 let lastReflectDate = ''; // YYYY-MM-DD of last evening reflect run
+/** Cap on banks reflected per evening, to bound LLM cost. */
+const MAX_REFLECT_SCOPES = 25;
 let lastWeeklyReportDate = ''; // YYYY-Www of last weekly cross-client report
 
 export function startHostSweep(): void {
@@ -228,8 +231,12 @@ async function runEveningReflect(): Promise<void> {
 
   if (!(await isHindsightAvailable())) return;
   try {
-    await hindsightReflect('global', 'key user preferences, communication style, and recurring patterns');
-    log.info('[hindsight] Evening reflect complete');
+    // Reflect inside each active conversation's own bank — never across them.
+    const scopes = memoryScopesForSessions(getActiveSessions()).slice(0, MAX_REFLECT_SCOPES);
+    for (const scope of scopes) {
+      await hindsightReflect(scope, 'key user preferences, communication style, and recurring patterns');
+    }
+    log.info('[hindsight] Evening reflect complete', { scopes: scopes.length });
   } catch (err) {
     log.warn('[hindsight] Evening reflect failed', { err });
   }
