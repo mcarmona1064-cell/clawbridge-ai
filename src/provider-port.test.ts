@@ -245,6 +245,17 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     expect(compose).not.toContain('vectorize-io/hindsight:latest');
   });
 
+  it('keeps the system prompt cache-stable: memory recall rides in the user turn', () => {
+    const claude = read('container/agent-runner/src/providers/claude.ts');
+    expect(claude).not.toMatch(/memoryContext,\s*baseInstructions/);
+    expect(claude).toContain('const instructions = input.systemContext?.instructions || undefined;');
+    expect(claude).toContain('stream.push(memory.decorate(input.prompt))');
+
+    const codex = read('container/agent-runner/src/providers/codex.ts');
+    expect(codex).toContain('input.continuation ? undefined : input.systemContext?.instructions');
+    expect(codex).toContain('state.pushQueue.push(memory.decorate(msg))');
+  });
+
   it('keeps upgrade/update pointed at the codex package', () => {
     const updater = read('src/updater.ts');
     expect(updater).toContain("PACKAGE_NAME = 'clawbridge-ai'");

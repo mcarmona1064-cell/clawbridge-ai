@@ -12,6 +12,7 @@
 
 import { spawn, type ChildProcess } from 'child_process';
 
+import { MemoryContextTracker } from './memory-context.js';
 import { registerProvider } from './provider-registry.js';
 import type {
   AgentProvider,
@@ -26,8 +27,7 @@ function log(msg: string): void {
   console.error(`[codex-provider] ${msg}`);
 }
 
-const STALE_SESSION_RE =
-  /session.*not found|no recorded session|missing transcript|unknown.*thread|invalid.*session/i;
+const STALE_SESSION_RE = /session.*not found|no recorded session|missing transcript|unknown.*thread|invalid.*session/i;
 
 function stripApiKeyEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
@@ -65,10 +65,7 @@ function mcpServerArgs(servers: Record<string, McpServerConfig>): string[] {
   return out;
 }
 
-function buildInitialArgs(
-  cwd: string,
-  mcpServers: Record<string, McpServerConfig>,
-): string[] {
+function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
   return [
     'exec',
     '--json',
@@ -114,10 +111,14 @@ export class CodexProvider implements AgentProvider {
     const mcpServers = this.mcpServers;
     const cwd = input.cwd;
 
-    const instructions = input.systemContext?.instructions?.trim();
-    const initialPrompt = instructions
-      ? `${instructions}\n\n---\n\n${input.prompt}`
-      : input.prompt;
+    // Instructions go only into a NEW thread; a resumed thread already has
+    // them, and re-sending them on every resume bloats each turn.
+    const instructions = input.continuation ? undefined : input.systemContext?.instructions?.trim();
+    // Hindsight recall (written by the host per inbound message) rides in the
+    // user turn; follow-ups carry it only when the recall changed.
+    const memory = new MemoryContextTracker();
+    const firstMessage = memory.decorate(input.prompt);
+    const initialPrompt = instructions ? `${instructions}\n\n---\n\n${firstMessage}` : firstMessage;
 
     const state: {
       threadId: string | undefined;
@@ -149,9 +150,7 @@ export class CodexProvider implements AgentProvider {
         const prompt = pending!;
         pending = undefined;
 
-        const baseArgs = state.threadId
-          ? buildResumeArgs(state.threadId)
-          : buildInitialArgs(cwd, mcpServers);
+        const baseArgs = state.threadId ? buildResumeArgs(state.threadId) : buildInitialArgs(cwd, mcpServers);
         const args = [...baseArgs, '--', prompt];
 
         log(`Spawning: codex ${args.slice(0, baseArgs.length).join(' ')} -- <prompt>`);
@@ -220,9 +219,7 @@ export class CodexProvider implements AgentProvider {
         if (!turnDone) {
           const msg =
             providerErrorMsg ??
-            (exitCode !== 0
-              ? `codex exec exited ${exitCode}`
-              : 'codex exec ended without turn.completed');
+            (exitCode !== 0 ? `codex exec exited ${exitCode}` : 'codex exec ended without turn.completed');
           const retryable = exitCode !== 1 && !STALE_SESSION_RE.test(msg);
           yield { type: 'error', message: msg, retryable };
           // After an error we still loop — next push() / next turn may succeed,
@@ -234,7 +231,7 @@ export class CodexProvider implements AgentProvider {
     return {
       push: (msg) => {
         if (state.aborted || state.ended) return;
-        state.pushQueue.push(msg);
+        state.pushQueue.push(memory.decorate(msg));
         state.wake?.();
       },
       end: () => {
@@ -256,10 +253,7 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
-async function* lineIterator(
-  proc: ChildProcess,
-  isAborted: () => boolean,
-): AsyncGenerator<string> {
+async function* lineIterator(proc: ChildProcess, isAborted: () => boolean): AsyncGenerator<string> {
   let buffer = '';
   const queue: string[] = [];
   let resolve: (() => void) | null = null;

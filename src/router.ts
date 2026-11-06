@@ -36,6 +36,9 @@ import { resolveSession, sessionDir, writeSessionMessage, writeOutboundDirect } 
 import { wakeContainer } from './container-runner.js';
 import { getSession } from './db/sessions.js';
 import { readableScopesForSession, recallToSessionFile } from './memory/index.js';
+
+/** Longest the router waits for memory recall before waking the agent. */
+const RECALL_WAIT_MS = 1500;
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
 
@@ -567,16 +570,17 @@ async function deliverToAgent(
     // messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
 
-    // Hindsight recall — write `.memory_context.md` into the session dir for
-    // the container's prompt builder. Fire-and-forget; never block delivery.
+    // Hindsight recall — write `.memory_context.md` into the session dir
+    // BEFORE waking the container, so the agent's first read sees this
+    // message's recall instead of the previous one. Bounded by
+    // RECALL_WAIT_MS: a slow or unavailable memory server never holds up the
+    // reply; recall then lands for the next turn.
     const queryText = safeParseContent(event.message.content).text ?? '';
     if (queryText) {
       // Reads only this conversation's bank plus the agent group's approved
-      // team facts, so a DM or another channel's memories can never be
-      // recalled here.
-      // Scope by the inbound message's own conversation (mg), not the
-      // session's: an agent-shared session spans several chats.
-      void recallToSessionFile(
+      // team facts, scoped by the inbound message's own conversation (mg),
+      // not the session's: an agent-shared session spans several chats.
+      const recall = recallToSessionFile(
         readableScopesForSession({ agent_group_id: session.agent_group_id, messaging_group_id: mg.id }),
         sessionDir(session.agent_group_id, session.id),
         queryText,
@@ -585,6 +589,7 @@ async function deliverToAgent(
           sessionId: session.id,
         },
       ).catch((err) => log.warn('[hindsight] recall threw', { sessionId: session.id, err }));
+      await Promise.race([recall, new Promise((resolve) => setTimeout(resolve, RECALL_WAIT_MS))]);
     }
 
     const freshSession = getSession(session.id);
