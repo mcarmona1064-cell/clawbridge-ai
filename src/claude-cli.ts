@@ -7,18 +7,19 @@ export type ClaudeCredential =
   | { kind: 'api-key'; key: 'ANTHROPIC_API_KEY'; value: string };
 
 /**
- * Resolve the Claude credential from ~/.clawbridge/.env (then process.env),
- * preferring a subscription OAuth token (`claude setup-token`) over an API
- * key, so a stray key never silently switches the install to API billing.
+ * Resolve the Claude credential from ~/.clawbridge/.env (then process.env).
+ * An Anthropic API key wins: Anthropic does not allow products built on the
+ * Agent SDK to use claude.ai login. A legacy subscription token is used only
+ * when no API key exists (doctor flags that setup).
  */
 export function resolveClaudeCredential(
   hostEnv: NodeJS.ProcessEnv = process.env,
   dotenv: Record<string, string> = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']),
 ): ClaudeCredential | null {
-  const oauth = dotenv.CLAUDE_CODE_OAUTH_TOKEN || hostEnv.CLAUDE_CODE_OAUTH_TOKEN;
-  if (oauth) return { kind: 'oauth', key: 'CLAUDE_CODE_OAUTH_TOKEN', value: oauth };
   const apiKey = dotenv.ANTHROPIC_API_KEY || hostEnv.ANTHROPIC_API_KEY;
   if (apiKey) return { kind: 'api-key', key: 'ANTHROPIC_API_KEY', value: apiKey };
+  const oauth = dotenv.CLAUDE_CODE_OAUTH_TOKEN || hostEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oauth) return { kind: 'oauth', key: 'CLAUDE_CODE_OAUTH_TOKEN', value: oauth };
   return null;
 }
 
@@ -53,7 +54,7 @@ export async function runClaudePrompt(
   const env: NodeJS.ProcessEnv = { ...process.env };
   const credential = resolveClaudeCredential();
   if (credential) {
-    // Forward exactly one credential so OAuth wins over a stray API key.
+    // Forward exactly one credential (the API key when present).
     delete env.CLAUDE_CODE_OAUTH_TOKEN;
     delete env.ANTHROPIC_API_KEY;
     env[credential.key] = credential.value;

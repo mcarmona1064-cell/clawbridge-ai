@@ -62,7 +62,7 @@ To migrate from an existing OpenClaw or NanoClaw install, choose the migration p
 
 - 🤖 **Multi-channel AI agents** — Telegram, WhatsApp, Discord, Slack, and more
 - 🤖 **Claude and Codex in one install** — each agent group (or session) runs on Claude Code or the OpenAI Codex CLI; switch with `/provider`
-- 🔐 **Subscription auth for both** — `claude setup-token` and `codex login --device-auth`; the runtime avoids accidental API-key billing
+- 🔐 **Clean auth for both** — an Anthropic API key for Claude, `codex login --device-auth` for Codex
 - 🧠 **Optional semantic memory** — Hindsight retain/recall/reflect memory can be enabled during setup
 - 🔌 **Connect your tools** — Google, HubSpot, Slack, and more via MCP
 - 👁 **Vision and document analysis** via GPT-4o
@@ -86,7 +86,7 @@ ClawBridge ships both providers in one agent image, so any agent can run on eith
 
 | Provider | Runtime in the container | Sign-in |
 |---|---|---|
-| `claude` | Claude Agent SDK driving Claude Code | `claude setup-token` (subscription), or an `ANTHROPIC_API_KEY` |
+| `claude` | Claude Agent SDK driving Claude Code | An `ANTHROPIC_API_KEY` (Anthropic does not allow claude.ai login in products built on the Agent SDK) |
 | `codex` | `codex exec --json` / `codex exec resume --json` | `codex login --device-auth` (ChatGPT subscription) |
 
 Setup asks which providers to enable and which one is the default (`DEFAULT_AGENT_PROVIDER` in `~/.clawbridge/.env`). The provider for each run is resolved in this order:
@@ -100,7 +100,7 @@ Setup asks which providers to enable and which one is the default (`DEFAULT_AGEN
 
 Both CLIs read the same composed instructions: the host mounts one file as both `AGENTS.md` and `CLAUDE.md`. Per-group persona and notes live in `AGENTS.local.md`.
 
-The Codex subprocess strips `OPENAI_API_KEY`, `CODEX_API_KEY`, and `OPENAI_BASE_URL` so it stays on subscription OAuth. For Claude, a subscription token always wins over an API key, and only one is passed in.
+The Codex subprocess strips `OPENAI_API_KEY`, `CODEX_API_KEY`, and `OPENAI_BASE_URL` so it stays on subscription OAuth. For Claude, the API key is used and only one credential is passed in; a legacy `CLAUDE_CODE_OAUTH_TOKEN` is a fallback that `doctor` flags.
 
 Host-side helper calls (memory extraction, reflection, error diagnosis) go through the CLI of `HOST_LLM_PROVIDER` (defaults to `DEFAULT_AGENT_PROVIDER`). To build a smaller image with only one CLI, set `INSTALL_CLAUDE=false` or `INSTALL_CODEX=false` when running `container/build.sh`.
 

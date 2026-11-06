@@ -174,7 +174,7 @@ function buildEnvFile(cfg: FreshConfig, existingEnv?: Map<string, string>): stri
   ];
   if (cfg.providers.claudeCredential) {
     lines.push(
-      '# Claude (subscription token from `claude setup-token`, or an API key)',
+      '# Claude (Anthropic API key)',
       `${cfg.providers.claudeCredential.key}=${cfg.providers.claudeCredential.value}`,
       '',
     );
@@ -283,84 +283,62 @@ async function setupCodexAuth(_existingValue?: string): Promise<void> {
 
 // ─── Claude auth ──────────────────────────────────────────────────────────────
 
-function classifyClaudeSecret(
-  value: string,
-): { key: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY'; value: string } | null {
-  const v = value.trim();
-  if (/^sk-ant-oat/.test(v)) return { key: 'CLAUDE_CODE_OAUTH_TOKEN', value: v };
-  if (/^sk-ant-api/.test(v)) return { key: 'ANTHROPIC_API_KEY', value: v };
-  return null;
+function isAnthropicApiKey(value: string): boolean {
+  return /^sk-ant-api/.test(value.trim());
 }
 
+/**
+ * Claude credential for the claude provider.
+ *
+ * Anthropic's Agent SDK terms: unless previously approved, products built on
+ * the Claude Agent SDK may not offer claude.ai login or subscription rate
+ * limits, and must use API-key authentication. So setup only collects an
+ * Anthropic API key. An existing subscription token is kept (so this run
+ * doesn't silently delete it) but flagged.
+ */
 async function setupClaudeAuth(
   existingEnv?: Map<string, string>,
 ): Promise<{ key: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY'; value: string } | undefined> {
-  const existingToken = existingEnv?.get('CLAUDE_CODE_OAUTH_TOKEN');
-  if (existingToken) {
-    p.log.success('Claude subscription token found ✓');
-    return { key: 'CLAUDE_CODE_OAUTH_TOKEN', value: existingToken };
-  }
   const existingKey = existingEnv?.get('ANTHROPIC_API_KEY');
   if (existingKey) {
-    p.log.success('Claude API key found ✓');
+    p.log.success('Anthropic API key found ✓');
     return { key: 'ANTHROPIC_API_KEY', value: existingKey };
+  }
+  const legacyToken = existingEnv?.get('CLAUDE_CODE_OAUTH_TOKEN');
+  if (legacyToken) {
+    p.log.warn(
+      'A Claude subscription token (CLAUDE_CODE_OAUTH_TOKEN) is set. Anthropic does not allow products built on the Claude Agent SDK to use claude.ai login — add an Anthropic API key instead.',
+    );
   }
 
   const method = ensure(
     await p.select<string>({
-      message: 'How should ClawBridge sign in to Claude?',
+      message: 'Anthropic API key for the Claude provider',
       options: [
-        { value: 'subscription', label: 'Claude subscription', hint: 'runs `claude setup-token` — recommended' },
-        { value: 'paste', label: 'Paste a token or API key', hint: 'sk-ant-oat… or sk-ant-api…' },
-        { value: 'skip', label: 'Skip for now', hint: 'add CLAUDE_CODE_OAUTH_TOKEN to ~/.clawbridge/.env later' },
+        { value: 'paste', label: 'Paste an Anthropic API key', hint: 'sk-ant-api… from console.anthropic.com' },
+        {
+          value: 'skip',
+          label: legacyToken ? 'Keep the existing subscription token for now' : 'Skip for now',
+          hint: 'add ANTHROPIC_API_KEY to ~/.clawbridge/.env later',
+        },
       ],
     }),
   ) as string;
   if (method === 'skip') {
-    p.log.warn('Claude left unauthenticated — agents on the claude provider will fail until a token is added.');
+    if (legacyToken) return { key: 'CLAUDE_CODE_OAUTH_TOKEN', value: legacyToken };
+    p.log.warn('Claude left unauthenticated — agents on the claude provider will fail until ANTHROPIC_API_KEY is set.');
     return undefined;
-  }
-
-  if (method === 'subscription') {
-    if (spawnSync('which', ['claude'], { encoding: 'utf8' }).status !== 0) {
-      p.log.info('Claude Code CLI is not installed. Installing now...');
-      const s = p.spinner();
-      s.start('Installing Claude Code (curl -fsSL https://claude.ai/install.sh | bash)…');
-      const install = spawnSync('bash', ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], {
-        stdio: 'pipe',
-        encoding: 'utf8',
-      });
-      const localBin = path.join(os.homedir(), '.local', 'bin');
-      if (!(process.env.PATH ?? '').split(':').includes(localBin)) {
-        process.env.PATH = `${localBin}:${process.env.PATH ?? ''}`;
-      }
-      if (install.status !== 0 || spawnSync('which', ['claude'], { encoding: 'utf8' }).status !== 0) {
-        s.stop(k.red('Failed to install Claude Code CLI.'));
-        p.log.error(
-          'Install it manually (curl -fsSL https://claude.ai/install.sh | bash), then paste the token below.',
-        );
-      } else {
-        s.stop(k.green('Claude Code CLI installed ✓'));
-      }
-    }
-    if (spawnSync('which', ['claude'], { encoding: 'utf8' }).status === 0) {
-      p.log.step('A browser window will open to sign in with your Claude account.');
-      p.log.message(dim('  Running: claude setup-token'));
-      spawnSync('claude', ['setup-token'], { stdio: 'inherit', encoding: 'utf8' });
-    }
   }
 
   const pasted = ensure(
     await p.password({
-      message: method === 'subscription' ? 'Paste the token printed above (sk-ant-oat…)' : 'Claude token or API key',
-      validate: (v) => (classifyClaudeSecret(v ?? '') ? undefined : 'Expected sk-ant-oat… or sk-ant-api…'),
+      message: 'Anthropic API key (sk-ant-api…)',
+      validate: (v) =>
+        isAnthropicApiKey(v ?? '') ? undefined : 'Expected an Anthropic API key starting with sk-ant-api',
     }),
   ) as string;
-  const credential = classifyClaudeSecret(pasted)!;
-  p.log.success(
-    credential.key === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'Claude subscription token saved ✓' : 'Claude API key saved ✓',
-  );
-  return credential;
+  p.log.success('Anthropic API key saved ✓');
+  return { key: 'ANTHROPIC_API_KEY', value: pasted.trim() };
 }
 
 // ─── Provider selection ───────────────────────────────────────────────────────
@@ -381,7 +359,7 @@ async function setupProviders(existingEnv?: Map<string, string>): Promise<Provid
     await p.multiselect<'claude' | 'codex'>({
       message: 'Which AI providers should your agents be able to use?',
       options: [
-        { value: 'claude', label: 'Claude', hint: 'Claude Code — subscription or API key' },
+        { value: 'claude', label: 'Claude', hint: 'Claude Agent SDK — Anthropic API key' },
         { value: 'codex', label: 'Codex', hint: 'OpenAI Codex — ChatGPT subscription' },
       ],
       initialValues: previousEnabled?.length ? previousEnabled : ['claude', 'codex'],

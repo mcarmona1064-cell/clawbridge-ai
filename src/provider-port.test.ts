@@ -63,7 +63,9 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     // Setup offers both providers; doctor checks auth for each enabled one.
     const wizard = read('src/setup/index.ts');
     expect(wizard).toContain('setupProviders');
-    expect(wizard).toContain('claude setup-token');
+    // Anthropic does not allow claude.ai login in products built on the Agent SDK.
+    expect(wizard).not.toContain("spawnSync('claude', ['setup-token']");
+    expect(wizard).toContain('Anthropic API key');
     expect(wizard).toContain('DEFAULT_AGENT_PROVIDER=');
     expect(read('src/doctor.ts')).toContain('Claude auth');
     expect(read('src/doctor.ts')).toContain('~/.codex/auth.json');
@@ -152,6 +154,8 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     const claudeAuthFiles = new Set(
       [
         'src/claude-cli.ts', // resolves the Claude credential for host-side `claude -p`
+        'src/host-llm.ts', // login hint names the ANTHROPIC_API_KEY variable to set
+        'container/agent-runner/src/scheduling/task-script.ts', // strips credential env vars from task scripts
         'src/providers/claude.ts', // passes the credential into claude containers
         'src/setup/index.ts', // setup wizard writes the token to ~/.clawbridge/.env
         'src/setup/migrate.ts', // migration detects legacy Claude env/files
