@@ -27,7 +27,7 @@ ARG INSTALL_CODEX=true
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
 ARG CLAUDE_CODE_VERSION=2.1.116
-ARG CODEX_VERSION=0.124.0
+ARG CODEX_VERSION=0.165.0
 ARG AGENT_BROWSER_VERSION=0.27.0
 ARG VERCEL_VERSION=53.3.0
 ARG BUN_VERSION=1.3.12

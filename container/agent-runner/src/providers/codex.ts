@@ -80,9 +80,10 @@ export function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServ
 
 /**
  * Resume a thread with the SAME sandbox, working directory and MCP servers as
- * a new one. In Codex 0.124 `--sandbox` and `-C` are `exec`-level options that
- * are not global, so they must come before the `resume` subcommand; `-c`
- * overrides and `--json` are global. Without them a resumed turn ran without
+ * a new one. `--sandbox` and `-C` are `exec`-level options that are not
+ * global (checked in codex-rs/exec/src/cli.rs for 0.124 and 0.167), so they
+ * must come before the `resume` subcommand; `-c` overrides are collected from
+ * every scope and `--json` is global. Without them a resumed turn ran without
  * the clawbridge MCP tools and with the default sandbox.
  */
 export function buildResumeArgs(threadId: string, cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
