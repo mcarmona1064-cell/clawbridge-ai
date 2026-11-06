@@ -231,8 +231,10 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
         /(recallToSessionFile|retainTurn|hindsightReflect|hindsightRecall|hindsightRetain)\(\s*'global'/,
       );
     }
-    expect(read('src/router.ts')).toMatch(/recallToSessionFile\(\s*readableScopesForSession\(session\)/);
-    expect(read('src/delivery.ts')).toMatch(/retainTurn\(\s*memoryScopeForSession\(session\)/);
+    expect(read('src/router.ts')).toMatch(
+      /recallToSessionFile\(\s*readableScopesForSession\(\{ agent_group_id: session\.agent_group_id, messaging_group_id: mg\.id \}\)/,
+    );
+    expect(read('src/delivery.ts')).toMatch(/retainTurn\(\s*memoryScopeForSession\(turnScope\)/);
 
     const hindsight = read('src/memory/hindsight.ts');
     expect(hindsight).not.toContain("tagsMatch: 'any_strict'");
