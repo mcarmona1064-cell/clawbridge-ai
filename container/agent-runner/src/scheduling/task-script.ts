@@ -16,6 +16,18 @@ function log(msg: string): void {
   console.error(`[task-script] ${msg}`);
 }
 
+/** Credentials a gate/pre-task script never needs. */
+const SECRET_ENV_KEYS = /^(ANTHROPIC_|CLAUDE_CODE_OAUTH|OPENAI_|CODEX_API|.*_API_KEY$|.*_TOKEN$|.*_SECRET$)/;
+
+/** process.env without provider credentials, for user-authored task scripts. */
+export function scriptEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!SECRET_ENV_KEYS.test(key)) out[key] = value;
+  }
+  return out;
+}
+
 export async function runScript(script: string, taskId: string): Promise<ScriptResult | null> {
   const scriptPath = path.join('/tmp', `task-script-${taskId}.sh`);
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
@@ -24,7 +36,7 @@ export async function runScript(script: string, taskId: string): Promise<ScriptR
     execFile(
       'bash',
       [scriptPath],
-      { timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: process.env },
+      { timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: scriptEnv() },
       (error, stdout, stderr) => {
         try {
           fs.unlinkSync(scriptPath);

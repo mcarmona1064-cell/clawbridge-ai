@@ -402,6 +402,29 @@ function buildMounts(
 }
 
 /**
+ * Docker hardening flags for agent containers. The agent runs as an
+ * unprivileged user and needs no capabilities (Chromium runs without its
+ * setuid sandbox). Limits are overridable from the environment:
+ * CONTAINER_MEMORY (default 4g), CONTAINER_PIDS_LIMIT (default 1024),
+ * CONTAINER_CPUS (unset = no cap). CONTAINER_HARDENING=off disables all of it.
+ */
+export function containerHardeningArgs(env: NodeJS.ProcessEnv = process.env): string[] {
+  if ((env.CONTAINER_HARDENING ?? '').toLowerCase() === 'off') return [];
+  const args = [
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--pids-limit',
+    env.CONTAINER_PIDS_LIMIT || '1024',
+    '--memory',
+    env.CONTAINER_MEMORY || '4g',
+  ];
+  if (env.CONTAINER_CPUS) args.push('--cpus', env.CONTAINER_CPUS);
+  return args;
+}
+
+/**
  * Sync skill symlinks in the provider state dir's skills/ to match the container.json
  * selection. Each symlink points to a container path (/app/skills/<name>)
  * so it's dangling on the host but valid inside the container.
@@ -543,6 +566,10 @@ async function buildContainerArgs(
 
   // Host gateway
   args.push(...hostGatewayArgs());
+
+  // Hardening: no Linux capabilities, no privilege escalation, and resource
+  // limits so a runaway agent can't exhaust the host.
+  args.push(...containerHardeningArgs());
 
   // User mapping
   const hostUid = process.getuid?.();
