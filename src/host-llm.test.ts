@@ -27,7 +27,7 @@ describe('runHostPrompt', () => {
     expect(args).toEqual(expect.arrayContaining(['exec', '--sandbox', 'read-only']));
   });
 
-  it('uses `claude -p` when HOST_LLM_PROVIDER=claude and forwards only the API key', async () => {
+  it('uses `claude -p` when HOST_LLM_PROVIDER=claude and forwards only the subscription token', async () => {
     process.env.HOST_LLM_PROVIDER = 'claude';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat-test';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-api-test';
@@ -40,9 +40,9 @@ describe('runHostPrompt', () => {
     expect(args.slice(0, 3)).toEqual(['-p', '--output-format', 'text']);
     expect(args).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
     expect(args[args.length - 1]).toBe('hi');
-    expect(opts.env.ANTHROPIC_API_KEY).toBe('sk-ant-api-test');
-    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    expect(hostLlmLoginHint()).toContain('ANTHROPIC_API_KEY');
+    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat-test');
+    expect(opts.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(hostLlmLoginHint()).toBe('claude setup-token');
   });
 
   it('ignores an unknown HOST_LLM_PROVIDER and falls back to codex', async () => {
@@ -53,15 +53,15 @@ describe('runHostPrompt', () => {
 });
 
 describe('resolveClaudeCredential', () => {
-  it('prefers an Anthropic API key over a legacy subscription token, .env over process env', async () => {
+  it('prefers the subscription token over an API key, .env over process env', async () => {
     const { resolveClaudeCredential } = await import('./claude-cli.js');
     expect(
-      resolveClaudeCredential({ CLAUDE_CODE_OAUTH_TOKEN: 'env-token' }, { ANTHROPIC_API_KEY: 'file-key' }),
-    ).toEqual({ kind: 'api-key', key: 'ANTHROPIC_API_KEY', value: 'file-key' });
-    expect(resolveClaudeCredential({}, { CLAUDE_CODE_OAUTH_TOKEN: 'file-token' })).toEqual({
-      kind: 'oauth',
-      key: 'CLAUDE_CODE_OAUTH_TOKEN',
-      value: 'file-token',
+      resolveClaudeCredential({ ANTHROPIC_API_KEY: 'env-key' }, { CLAUDE_CODE_OAUTH_TOKEN: 'file-token' }),
+    ).toEqual({ kind: 'oauth', key: 'CLAUDE_CODE_OAUTH_TOKEN', value: 'file-token' });
+    expect(resolveClaudeCredential({}, { ANTHROPIC_API_KEY: 'file-key' })).toEqual({
+      kind: 'api-key',
+      key: 'ANTHROPIC_API_KEY',
+      value: 'file-key',
     });
     expect(resolveClaudeCredential({}, {})).toBeNull();
   });

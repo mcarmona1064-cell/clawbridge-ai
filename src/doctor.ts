@@ -784,22 +784,18 @@ function checkProvider(env: Map<string, string>): void {
   }
 
   if (enabled.includes('claude')) {
-    // Claude runs from an Anthropic API key in ~/.clawbridge/.env, passed to
-    // claude containers only. Subscription tokens are flagged: Anthropic does
-    // not allow claude.ai login in products built on the Agent SDK.
-    if (env.get('ANTHROPIC_API_KEY')) {
-      pass('Claude auth', dim('Anthropic API key in ~/.clawbridge/.env'));
-    } else if (env.get('CLAUDE_CODE_OAUTH_TOKEN')) {
-      fail(
-        'Claude auth',
-        'only a Claude subscription token is set — Anthropic does not allow products built on the Agent SDK to use claude.ai login',
-        'add ANTHROPIC_API_KEY=sk-ant-api… to ~/.clawbridge/.env (console.anthropic.com)',
-      );
+    // Claude runs from the subscription token `claude setup-token` prints, or
+    // an Anthropic API key, stored in ~/.clawbridge/.env and passed to claude
+    // containers only.
+    if (env.get('CLAUDE_CODE_OAUTH_TOKEN')) {
+      pass('Claude auth', dim('Claude subscription token in ~/.clawbridge/.env'));
+    } else if (env.get('ANTHROPIC_API_KEY')) {
+      pass('Claude auth', dim('Anthropic API key in ~/.clawbridge/.env (billed per token)'));
     } else {
       fail(
         'Claude auth',
-        'no ANTHROPIC_API_KEY in ~/.clawbridge/.env',
-        'add ANTHROPIC_API_KEY=sk-ant-api… to ~/.clawbridge/.env (console.anthropic.com)',
+        'no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in ~/.clawbridge/.env',
+        'run: claude setup-token, then add CLAUDE_CODE_OAUTH_TOKEN=… to ~/.clawbridge/.env',
       );
     }
   }

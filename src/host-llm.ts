@@ -2,7 +2,7 @@
  * Host-side one-shot LLM calls (memory extraction, reflection, cross-client
  * reports, error diagnosis) routed through whichever provider CLI the
  * install uses. Both paths use the CLI's own login — `codex login` OAuth or
- * the Anthropic API key for `claude -p` — never raw API calls from here.
+ * the Claude subscription token or API key for `claude -p` — never raw API calls from here.
  *
  * Provider: HOST_LLM_PROVIDER in ~/.clawbridge/.env (claude|codex), falling
  * back to the install default (DEFAULT_AGENT_PROVIDER).
@@ -29,7 +29,7 @@ export function hostLlmLabel(provider: AgentProviderName = resolveHostLlmProvide
 }
 
 export function hostLlmLoginHint(provider: AgentProviderName = resolveHostLlmProvider()): string {
-  return provider === 'claude' ? 'add ANTHROPIC_API_KEY to ~/.clawbridge/.env' : 'codex login --device-auth';
+  return provider === 'claude' ? 'claude setup-token' : 'codex login --device-auth';
 }
 
 export async function runHostPrompt(prompt: string, opts: HostPromptOptions = {}): Promise<string> {

@@ -63,9 +63,8 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     // Setup offers both providers; doctor checks auth for each enabled one.
     const wizard = read('src/setup/index.ts');
     expect(wizard).toContain('setupProviders');
-    // Anthropic does not allow claude.ai login in products built on the Agent SDK.
-    expect(wizard).not.toContain("spawnSync('claude', ['setup-token']");
-    expect(wizard).toContain('Anthropic API key');
+    expect(wizard).toContain('claude setup-token');
+    expect(wizard).toContain('CLAUDE_SUBSCRIPTION_NOTE');
     expect(wizard).toContain('DEFAULT_AGENT_PROVIDER=');
     expect(read('src/doctor.ts')).toContain('Claude auth');
     expect(read('src/doctor.ts')).toContain('~/.codex/auth.json');

@@ -4,10 +4,9 @@
  *
  * - Seeds `settings.json` in the per-group `.claude-shared/` state dir
  *   (mounted at /home/node/.claude by container-runner).
- * - Passes the Claude credential from ~/.clawbridge/.env: an Anthropic API
- *   key. (Anthropic does not allow products built on the Agent SDK to use
- *   claude.ai login; a legacy subscription token is only a fallback, and
- *   doctor flags it.) Exactly one credential is forwarded.
+ * - Passes the Claude credential from ~/.clawbridge/.env: the subscription
+ *   token from `claude setup-token` (preferred) or an Anthropic API key.
+ *   Exactly one is forwarded, so a stray API key can't switch billing.
  */
 import fs from 'fs';
 import path from 'path';
@@ -40,7 +39,7 @@ registerProviderContainerConfig('claude', ({ agentGroupId, hostEnv }) => {
 
   const credential = resolveClaudeCredential(hostEnv);
   if (!credential) {
-    log.warn('Claude provider selected but no ANTHROPIC_API_KEY in ~/.clawbridge/.env', {
+    log.warn('Claude provider selected but no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in ~/.clawbridge/.env', {
       agentGroupId,
     });
     return {};
