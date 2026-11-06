@@ -454,3 +454,58 @@ describe('delivery', () => {
     expect(JSON.parse(undelivered[0].content).text).toBe('Agent response');
   });
 });
+
+describe('agent-shared sessions never absorb a DM', () => {
+  beforeEach(() => {
+    createAgentGroup({ id: 'ag-s', name: 'Shared', folder: 'shared-agent', agent_provider: null, created_at: now() });
+    for (const [id, platformId, isGroup] of [
+      ['mg-ch', 'C-SHARED-1', 1],
+      ['mg-ch2', 'C-SHARED-2', 1],
+      ['mg-dm', 'D-ALICE', 0],
+    ] as const) {
+      createMessagingGroup({
+        id,
+        channel_type: 'discord',
+        platform_id: platformId,
+        name: id,
+        is_group: isGroup,
+        unknown_sender_policy: 'public',
+        created_at: now(),
+      });
+      createMessagingGroupAgent({
+        id: `mga-${id}`,
+        messaging_group_id: id,
+        agent_group_id: 'ag-s',
+        engage_mode: 'pattern',
+        engage_pattern: '.',
+        sender_scope: 'all',
+        ignored_message_policy: 'drop',
+        session_mode: 'agent-shared',
+        priority: 0,
+        created_at: now(),
+      });
+    }
+  });
+
+  it('keeps the DM in its own session while group chats share one', async () => {
+    const { routeInbound } = await import('./router.js');
+    const { getSessionsByAgentGroup } = await import('./db/index.js');
+    const send = (platformId: string, id: string) =>
+      routeInbound({
+        channelType: 'discord',
+        platformId,
+        threadId: null,
+        message: { id, kind: 'chat', content: JSON.stringify({ sender: 'A', text: 'hello' }), timestamp: now() },
+      });
+
+    await send('C-SHARED-1', 'm1');
+    await send('C-SHARED-2', 'm2');
+    await send('D-ALICE', 'm3');
+
+    const sessions = getSessionsByAgentGroup('ag-s');
+    const dmSessions = sessions.filter((s) => s.messaging_group_id === 'mg-dm');
+    expect(dmSessions).toHaveLength(1);
+    // The two group channels still share a single agent-shared session.
+    expect(sessions.filter((s) => s.messaging_group_id !== 'mg-dm')).toHaveLength(1);
+  });
+});

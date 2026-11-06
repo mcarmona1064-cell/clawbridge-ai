@@ -221,14 +221,21 @@ async function drainSession(session: Session): Promise<void> {
             const userText = extractText(userContent);
             const agentText = extractText(msg.content);
             if (userText && agentText) {
-              // Provenance is stamped by the host from the messaging group,
-              // never chosen by the model.
-              const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+              // Scope and provenance come from the conversation this reply
+              // goes to (an agent-shared session spans several chats), and
+              // are stamped by the host, never chosen by the model.
+              const destMg =
+                msg.channel_type && msg.platform_id
+                  ? getMessagingGroupByPlatform(msg.channel_type, msg.platform_id)
+                  : session.messaging_group_id
+                    ? getMessagingGroup(session.messaging_group_id)
+                    : undefined;
+              const turnScope = { agent_group_id: session.agent_group_id, messaging_group_id: destMg?.id ?? null };
               const extraTags = provenanceTags({
-                origin: originForSession(session, mg),
-                messagingGroupId: session.messaging_group_id,
+                origin: originForSession(turnScope, destMg),
+                messagingGroupId: turnScope.messaging_group_id,
               });
-              void retainTurn(memoryScopeForSession(session), userText, agentText, {
+              void retainTurn(memoryScopeForSession(turnScope), userText, agentText, {
                 sessionId: session.id,
                 extraTags,
               }).catch((err) => log.warn('[hindsight] retainTurn threw', { sessionId: session.id, err }));

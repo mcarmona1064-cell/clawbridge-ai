@@ -387,6 +387,12 @@ async function deliverToAgent(
   // a cross-channel directive the adapter doesn't know about). DMs collapse
   // sub-threads to one session (is_group=0 short-circuit).
   let effectiveSessionMode = agent.session_mode;
+  // A DM never joins an agent-shared session: that session's live context
+  // spans every wired chat, so a private conversation would be visible to
+  // all of them. DMs always get their own session.
+  if (effectiveSessionMode === 'agent-shared' && mg.is_group === 0) {
+    effectiveSessionMode = 'shared';
+  }
   if (adapterSupportsThreads && effectiveSessionMode !== 'agent-shared' && mg.is_group !== 0) {
     effectiveSessionMode = 'per-thread';
   }
@@ -568,8 +574,10 @@ async function deliverToAgent(
       // Reads only this conversation's bank plus the agent group's approved
       // team facts, so a DM or another channel's memories can never be
       // recalled here.
+      // Scope by the inbound message's own conversation (mg), not the
+      // session's: an agent-shared session spans several chats.
       void recallToSessionFile(
-        readableScopesForSession(session),
+        readableScopesForSession({ agent_group_id: session.agent_group_id, messaging_group_id: mg.id }),
         sessionDir(session.agent_group_id, session.id),
         queryText,
         {
