@@ -58,7 +58,7 @@ export const hostExec: McpToolDefinition = {
   tool: {
     name: 'host_exec',
     description:
-      'Execute a shell command on the host machine and wait for its output. Returns stdout, stderr, and exit code. Requires `allowHostExec: true` in container.json (defaults off). Use for system administration, package installs, process management, and any terminal operation that needs to run outside the container.',
+      'Execute a shell command on the host machine and wait for its output. Returns stdout, stderr, and exit code. Requires `allowHostExec: true` in container.json (defaults off). Only simple read-only commands (pwd, ls, date, df, git status/log/diff, …) run immediately; anything else waits for an admin to approve it, so tell the user you are waiting. Commands touching secrets locations (.clawbridge, .env, .ssh, .codex, .claude) always need approval. Use only when the work truly needs to run outside the container.',
     inputSchema: {
       type: 'object' as const,
       properties: {

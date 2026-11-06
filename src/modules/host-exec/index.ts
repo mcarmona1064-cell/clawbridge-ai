@@ -9,6 +9,13 @@
  * Gating happens here too (defense in depth — the container tool also gates):
  * a session's agent group must have `allowHostExec: true` in container.json.
  * Anything else gets a permission-denied response and the request is removed.
+ *
+ * Approve by default: a command runs without approval only when it is a
+ * single, simple, read-only command on the allowlist below, with no shell
+ * operators and no path into a secrets location. Everything else (including
+ * interpreters like `python -c …`, pipes, redirects and `cat ~/.clawbridge/.env`)
+ * waits for an admin's approval. The requested cwd must be an existing
+ * absolute directory outside secrets locations.
  */
 import { exec } from 'child_process';
 import fs from 'fs';
@@ -47,22 +54,77 @@ interface HostExecApprovalPayload {
   responsePath: string;
 }
 
-const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
-  /(^|[;&|()\s])sudo(\s|$)/i,
-  /\brm\s+[^\n]*-(?:[^\n]*r[^\n]*f|[^\n]*f[^\n]*r)/i,
-  /\b(?:launchctl|systemctl)\b/i,
-  /\b(?:kill|pkill|killall)\b/i,
-  /\bdocker\s+(?:stop|rm|rmi|compose\s+down)\b/i,
-  /\bgit\s+reset\s+--hard\b/i,
-  /\bgit\s+clean\b/i,
-  /\b(?:apt|apt-get|brew|npm|pnpm|yarn|pip|pip3)\s+(?:install|remove|uninstall|upgrade|update)\b/i,
-  /\bcurl\b[^\n]*(?:\||>)\s*(?:sh|bash|zsh)\b/i,
-  /\bwget\b[^\n]*(?:\||>)\s*(?:sh|bash|zsh)\b/i,
+/** Programs that may run without approval when used read-only. */
+const AUTO_APPROVED_PROGRAMS = new Set([
+  'pwd',
+  'ls',
+  'date',
+  'whoami',
+  'id',
+  'hostname',
+  'uname',
+  'uptime',
+  'df',
+  'du',
+  'which',
+  'echo',
+  'wc',
+]);
+
+/** Read-only git subcommands that may run without approval. */
+const AUTO_APPROVED_GIT_SUBCOMMANDS = new Set(['status', 'log', 'diff', 'show', 'branch', 'rev-parse', 'remote']);
+
+/** Shell syntax that chains, substitutes, redirects or backgrounds commands. */
+const SHELL_OPERATORS = /[;&|`<>\n\r]|\$\(|\$\{/;
+
+/** Paths an agent must never touch without a human looking first. */
+const SECRET_PATH_PATTERNS: RegExp[] = [
+  /(^|[\s/=~])\.clawbridge(\/|\s|$)/,
+  /(^|[\s/=])\.env(\.|\s|$)/,
+  /(^|[\s/=~])\.ssh(\/|\s|$)/,
+  /(^|[\s/=~])\.codex(\/|\s|$)/,
+  /(^|[\s/=~])\.claude(\/|\s|$)/,
+  /(^|[\s/=~])\.aws(\/|\s|$)/,
+  /(^|[\s/=~])\.config\/clawbridge(\/|\s|$)/,
+  /\bid_(?:rsa|ed25519|ecdsa)\b/,
 ];
 
-export function isDangerousHostExecCommand(command: string): boolean {
+export function touchesSecretPath(text: string): boolean {
+  return SECRET_PATH_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * True unless the command is a single, simple, read-only command on the
+ * allowlist. Approval is the default; this is the only way to skip it.
+ */
+export function needsHostExecApproval(command: string): boolean {
   const trimmed = command.trim();
-  return DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(trimmed));
+  if (!trimmed || SHELL_OPERATORS.test(trimmed) || touchesSecretPath(trimmed)) return true;
+  const [program, sub, ...rest] = trimmed.split(/\s+/);
+  if (program === 'git') {
+    if (!sub || !AUTO_APPROVED_GIT_SUBCOMMANDS.has(sub)) return true;
+    // `git branch -D x`, `git remote add …` etc. change state.
+    if (sub === 'branch' && rest.some((a) => /^-[a-zA-Z]*[dDmMcC]/.test(a) || !a.startsWith('-'))) return true;
+    if (sub === 'remote' && rest.some((a) => !a.startsWith('-'))) return true;
+    return false;
+  }
+  return !AUTO_APPROVED_PROGRAMS.has(program);
+}
+
+/** @deprecated use needsHostExecApproval — kept for callers of the old name. */
+export const isDangerousHostExecCommand = needsHostExecApproval;
+
+/** Validate the requested working directory. Returns an error string, or null if usable. */
+export function invalidHostExecCwd(cwd: string | undefined): string | null {
+  if (cwd === undefined || cwd === '') return null;
+  if (!path.isAbsolute(cwd)) return `cwd must be an absolute path (got "${cwd}")`;
+  if (touchesSecretPath(cwd)) return 'cwd points into a secrets location';
+  try {
+    if (!fs.statSync(cwd).isDirectory()) return `cwd is not a directory: ${cwd}`;
+  } catch {
+    return `cwd does not exist: ${cwd}`;
+  }
+  return null;
 }
 
 function deniedResponse(error: string): ExecResponse {
@@ -186,7 +248,8 @@ async function requestHostExecApproval(session: Session, req: ExecRequest, resPa
     },
     title: 'Approve host terminal command?',
     question: [
-      'A container agent requested a host terminal command that needs approval.',
+      'A container agent wants to run this command on the HOST machine (outside its container).',
+      'Only approve it if you understand exactly what it does.',
       '',
       `Agent group: ${session.agent_group_id}`,
       `Session: ${session.id}`,
@@ -264,7 +327,14 @@ async function processRequest(
       return;
     }
 
-    if (isDangerousHostExecCommand(req.command)) {
+    const cwdError = invalidHostExecCwd(req.cwd);
+    if (cwdError) {
+      log.warn('host_exec: rejected — bad cwd', { reqId: req.id, cwd: req.cwd, cwdError });
+      writeAtomic(resPath, JSON.stringify(deniedResponse(`host_exec rejected: ${cwdError}.`)));
+      return;
+    }
+
+    if (needsHostExecApproval(req.command)) {
       log.info('host_exec: approval requested', {
         reqId: req.id,
         command: req.command,
