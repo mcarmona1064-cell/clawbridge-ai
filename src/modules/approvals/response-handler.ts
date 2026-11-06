@@ -12,37 +12,71 @@
  * core iterates handlers and the first one to return `true` claims the response.
  */
 import { wakeContainer } from '../../container-runner.js';
-import { deletePendingApproval, getPendingApproval, getSession } from '../../db/sessions.js';
+import {
+  getExpiredPendingApprovals,
+  getPendingApproval,
+  getSession,
+  recordApprovalDecision,
+} from '../../db/sessions.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
+import { hasAdminPrivilege } from '../permissions/db/user-roles.js';
 import { getApprovalHandler, getApprovalRejectionHandler } from './primitive.js';
+
+/**
+ * Namespaced id of whoever responded. Card clicks arrive with the raw
+ * platform id ("U123"); host commands pass an already-namespaced id
+ * ("slack:U123").
+ */
+export function clickerIdFor(payload: Pick<ResponsePayload, 'userId' | 'channelType'>): string | null {
+  const raw = payload.userId?.trim();
+  if (!raw) return null;
+  return raw.includes(':') ? raw : `${payload.channelType}:${raw}`;
+}
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   const approval = getPendingApproval(payload.questionId);
   if (!approval) return false;
 
-  await handleRegisteredApproval(approval, payload.value, payload.userId ?? '');
+  // A card can be clicked again, forwarded, or answered after a restart:
+  // only a still-pending approval can be decided.
+  if (approval.status !== 'pending') {
+    log.info('Approval response ignored — already decided', {
+      approvalId: approval.approval_id,
+      status: approval.status,
+    });
+    return true;
+  }
+
+  const session = approval.session_id ? getSession(approval.session_id) : undefined;
+  const agentGroupId = approval.agent_group_id ?? session?.agent_group_id ?? null;
+
+  // Only an owner or admin of this agent group may decide. Anyone else's
+  // click (a forwarded card, a bystander in a shared channel) is claimed
+  // and ignored.
+  const clickerId = clickerIdFor(payload);
+  if (!clickerId || !agentGroupId || !hasAdminPrivilege(clickerId, agentGroupId)) {
+    log.warn('Approval click rejected — unauthorized clicker', {
+      approvalId: approval.approval_id,
+      action: approval.action,
+      clickerId,
+    });
+    return true;
+  }
+
+  if (approval.expires_at && Date.parse(approval.expires_at) <= Date.now()) {
+    await expireApproval(approval);
+    return true;
+  }
+
+  await handleRegisteredApproval(approval, payload.value, clickerId);
   return true;
 }
 
-async function handleRegisteredApproval(
-  approval: PendingApproval,
-  selectedOption: string,
-  userId: string,
-): Promise<void> {
-  if (!approval.session_id) {
-    deletePendingApproval(approval.approval_id);
-    return;
-  }
-  const session = getSession(approval.session_id);
-  if (!session) {
-    deletePendingApproval(approval.approval_id);
-    return;
-  }
-
-  const notify = (text: string): void => {
+function notifierFor(session: { agent_group_id: string; id: string }) {
+  return (text: string): void => {
     writeSessionMessage(session.agent_group_id, session.id, {
       id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat',
@@ -53,6 +87,43 @@ async function handleRegisteredApproval(
       content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
     });
   };
+}
+
+/** Mark an approval expired and tell the requesting agent. */
+export async function expireApproval(approval: PendingApproval): Promise<void> {
+  recordApprovalDecision(approval.approval_id, 'expired', null);
+  log.info('Approval expired', { approvalId: approval.approval_id, action: approval.action });
+  const session = approval.session_id ? getSession(approval.session_id) : undefined;
+  if (!session) return;
+  notifierFor(session)(`Your ${approval.action} request expired without a decision. Ask again if it is still needed.`);
+  await wakeContainer(session);
+}
+
+/** Expire every pending approval past its deadline. Called by the host sweep. */
+export async function expireStaleApprovals(now: Date = new Date()): Promise<number> {
+  const stale = getExpiredPendingApprovals(now.toISOString());
+  for (const approval of stale) {
+    try {
+      await expireApproval(approval);
+    } catch (err) {
+      log.warn('Failed to expire approval', { approvalId: approval.approval_id, err });
+    }
+  }
+  return stale.length;
+}
+
+async function handleRegisteredApproval(
+  approval: PendingApproval,
+  selectedOption: string,
+  userId: string,
+): Promise<void> {
+  const session = approval.session_id ? getSession(approval.session_id) : undefined;
+  if (!session) {
+    recordApprovalDecision(approval.approval_id, 'expired', null);
+    return;
+  }
+
+  const notify = notifierFor(session);
 
   if (selectedOption !== 'approve') {
     const rejectionHandler = getApprovalRejectionHandler(approval.action);
@@ -74,7 +145,7 @@ async function handleRegisteredApproval(
       notify(`Your ${approval.action} request was rejected by admin.`);
     }
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
-    deletePendingApproval(approval.approval_id);
+    recordApprovalDecision(approval.approval_id, 'rejected', userId);
     await wakeContainer(session);
     return;
   }
@@ -87,7 +158,7 @@ async function handleRegisteredApproval(
       action: approval.action,
     });
     notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
-    deletePendingApproval(approval.approval_id);
+    recordApprovalDecision(approval.approval_id, 'approved', userId);
     await wakeContainer(session);
     return;
   }
@@ -103,6 +174,6 @@ async function handleRegisteredApproval(
     );
   }
 
-  deletePendingApproval(approval.approval_id);
+  recordApprovalDecision(approval.approval_id, 'approved', userId);
   await wakeContainer(session);
 }

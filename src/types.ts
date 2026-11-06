@@ -177,6 +177,9 @@ export interface PendingApproval {
   status: 'pending' | 'approved' | 'rejected' | 'expired';
   title: string;
   options_json: string;
+  /** Namespaced user id of whoever decided (null while pending or when it expired). */
+  decided_by?: string | null;
+  decided_at?: string | null;
 }
 
 // ── Agent destinations (central DB) ──

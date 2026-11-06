@@ -167,6 +167,14 @@ export interface RequestApprovalOptions {
   question: string;
 }
 
+const DEFAULT_APPROVAL_TTL_HOURS = 24;
+
+/** How long an approval card stays actionable. APPROVAL_TTL_HOURS overrides. */
+export function approvalTtlMs(): number {
+  const hours = Number(process.env.APPROVAL_TTL_HOURS);
+  return (Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_APPROVAL_TTL_HOURS) * 60 * 60 * 1000;
+}
+
 /**
  * Queue an approval request. Picks an approver, delivers the card to their
  * DM, and records the pending_approvals row. Fire-and-forget from the
@@ -194,13 +202,16 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<boo
 
   const approvalId = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const normalizedOptions = normalizeOptions(APPROVAL_OPTIONS);
+  const createdAt = new Date();
   createPendingApproval({
     approval_id: approvalId,
     session_id: session.id,
     request_id: approvalId,
     action,
     payload: JSON.stringify(payload),
-    created_at: new Date().toISOString(),
+    created_at: createdAt.toISOString(),
+    agent_group_id: session.agent_group_id,
+    expires_at: new Date(createdAt.getTime() + approvalTtlMs()).toISOString(),
     title,
     options_json: JSON.stringify(normalizedOptions),
     channel_type: target.messagingGroup.channel_type,

@@ -169,6 +169,14 @@ async function sweep(): Promise<void> {
   }
 
   try {
+    const { expireStaleApprovals } = await import('./modules/approvals/response-handler.js');
+    const expired = await expireStaleApprovals();
+    if (expired > 0) log.info('Expired stale approvals', { count: expired });
+  } catch (err) {
+    log.error('Host sweep approval expiry error', { err });
+  }
+
+  try {
     await retryDroppedA2aMessages();
   } catch (err) {
     log.error('Host sweep A2A retry error', { err });

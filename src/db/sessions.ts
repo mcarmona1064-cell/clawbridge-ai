@@ -184,6 +184,25 @@ export function updatePendingApprovalStatus(approvalId: string, status: PendingA
   getDb().prepare('UPDATE pending_approvals SET status = ? WHERE approval_id = ?').run(status, approvalId);
 }
 
+/** Record the outcome of an approval and keep the row as a record. */
+export function recordApprovalDecision(
+  approvalId: string,
+  status: Exclude<PendingApproval['status'], 'pending'>,
+  decidedBy: string | null,
+  decidedAt: string = new Date().toISOString(),
+): void {
+  getDb()
+    .prepare('UPDATE pending_approvals SET status = ?, decided_by = ?, decided_at = ? WHERE approval_id = ?')
+    .run(status, decidedBy, decidedAt, approvalId);
+}
+
+/** Pending approvals whose expires_at has passed. */
+export function getExpiredPendingApprovals(nowIso: string = new Date().toISOString()): PendingApproval[] {
+  return getDb()
+    .prepare("SELECT * FROM pending_approvals WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?")
+    .all(nowIso) as PendingApproval[];
+}
+
 export function deletePendingApproval(approvalId: string): void {
   getDb().prepare('DELETE FROM pending_approvals WHERE approval_id = ?').run(approvalId);
 }
