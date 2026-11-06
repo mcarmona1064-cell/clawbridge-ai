@@ -2,8 +2,10 @@
   <img src="assets/clawbridge-logo.png" alt="ClawBridge" width="400">
 </p>
 
+<h1 align="center">ClawBridge AI</h1>
+
 <p align="center">
-  ClawBridge — self-hosted, multi-channel AI agents powered by Claude or OpenAI Codex.
+  A self-hosted AI coworker for your whole team, in Slack and every other channel, powered by Claude or OpenAI Codex.
 </p>
 
 <p align="center">
