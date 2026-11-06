@@ -1,5 +1,5 @@
 import { log } from '../log.js';
-import { runCodexPrompt } from '../codex-cli.js';
+import { runHostPrompt } from '../host-llm.js';
 import { deleteMemory, resolveConflicts, upsertMemory } from './db.js';
 import { SEGMENT_DEFAULTS } from './types.js';
 import type { Memory, MemorySegment } from './types.js';
@@ -38,7 +38,7 @@ interface RawMemory {
 export async function extractMemories(text: string, clientId: string): Promise<Memory[]> {
   let raw: RawMemory[];
   try {
-    const textBlock = await runCodexPrompt(
+    const textBlock = await runHostPrompt(
       `${SYSTEM_PROMPT}\n\nConversation or summary:\n${text}\n\nReturn JSON only.`,
       { sandbox: 'read-only', timeout: 120_000 },
     );

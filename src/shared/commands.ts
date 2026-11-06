@@ -41,6 +41,12 @@ const DEFINITIONS: SlashCommandDefinition[] = [
     description: 'List all agent groups and their descriptions',
   },
   {
+    command: '/provider',
+    category: 'host',
+    adminOnly: true,
+    description: 'Show or switch the AI provider (/provider claude|codex [session] or /provider default)',
+  },
+  {
     command: '/health',
     category: 'host',
     adminOnly: false,

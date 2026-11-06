@@ -136,8 +136,18 @@ function validateRequired(value: string | undefined): string | undefined {
 
 // ─── .env generation ─────────────────────────────────────────────────────────
 
+interface ProviderSetup {
+  /** Providers the user enabled in setup (at least one). */
+  providers: Array<'claude' | 'codex'>;
+  /** Install-wide default provider (DEFAULT_AGENT_PROVIDER). */
+  defaultProvider: 'claude' | 'codex';
+  /** Claude credential to store in .env, when Claude is enabled. */
+  claudeCredential?: { key: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY'; value: string };
+}
+
 interface FreshConfig {
   agentName: string;
+  providers: ProviderSetup;
   telegramToken?: string;
   channels: string[];
   hindsightDbPassword?: string;
@@ -153,7 +163,22 @@ function buildEnvFile(cfg: FreshConfig, existingEnv?: Map<string, string>): stri
     '# Agent identity',
     `ASSISTANT_NAME=${cfg.agentName}`,
     '',
+    '# Agent providers — both ship in the agent image. DEFAULT_AGENT_PROVIDER is',
+    '# used unless an agent group or session overrides it (/provider in chat).',
+    `DEFAULT_AGENT_PROVIDER=${cfg.providers.defaultProvider}`,
+    `ENABLED_AGENT_PROVIDERS=${cfg.providers.providers.join(',')}`,
+    // Legacy marker read by the migration detector — keep it on codex so this
+    // install is never mistaken for an old clawbridge-agent install.
+    'AGENT_PROVIDER=codex',
+    '',
   ];
+  if (cfg.providers.claudeCredential) {
+    lines.push(
+      '# Claude (subscription token from `claude setup-token`, or an API key)',
+      `${cfg.providers.claudeCredential.key}=${cfg.providers.claudeCredential.value}`,
+      '',
+    );
+  }
 
   if (cfg.telegramToken) {
     lines.push('# Telegram', `TELEGRAM_BOT_TOKEN=${cfg.telegramToken}`, '');
@@ -254,6 +279,134 @@ async function setupCodexAuth(_existingValue?: string): Promise<void> {
   p.log.error('Codex authentication failed (~/.codex/auth.json not written).');
   p.log.message(dim('  Re-run setup and try again.'));
   process.exit(1);
+}
+
+// ─── Claude auth ──────────────────────────────────────────────────────────────
+
+function classifyClaudeSecret(
+  value: string,
+): { key: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY'; value: string } | null {
+  const v = value.trim();
+  if (/^sk-ant-oat/.test(v)) return { key: 'CLAUDE_CODE_OAUTH_TOKEN', value: v };
+  if (/^sk-ant-api/.test(v)) return { key: 'ANTHROPIC_API_KEY', value: v };
+  return null;
+}
+
+async function setupClaudeAuth(
+  existingEnv?: Map<string, string>,
+): Promise<{ key: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY'; value: string } | undefined> {
+  const existingToken = existingEnv?.get('CLAUDE_CODE_OAUTH_TOKEN');
+  if (existingToken) {
+    p.log.success('Claude subscription token found ✓');
+    return { key: 'CLAUDE_CODE_OAUTH_TOKEN', value: existingToken };
+  }
+  const existingKey = existingEnv?.get('ANTHROPIC_API_KEY');
+  if (existingKey) {
+    p.log.success('Claude API key found ✓');
+    return { key: 'ANTHROPIC_API_KEY', value: existingKey };
+  }
+
+  const method = ensure(
+    await p.select<string>({
+      message: 'How should ClawBridge sign in to Claude?',
+      options: [
+        { value: 'subscription', label: 'Claude subscription', hint: 'runs `claude setup-token` — recommended' },
+        { value: 'paste', label: 'Paste a token or API key', hint: 'sk-ant-oat… or sk-ant-api…' },
+        { value: 'skip', label: 'Skip for now', hint: 'add CLAUDE_CODE_OAUTH_TOKEN to ~/.clawbridge/.env later' },
+      ],
+    }),
+  ) as string;
+  if (method === 'skip') {
+    p.log.warn('Claude left unauthenticated — agents on the claude provider will fail until a token is added.');
+    return undefined;
+  }
+
+  if (method === 'subscription') {
+    if (spawnSync('which', ['claude'], { encoding: 'utf8' }).status !== 0) {
+      p.log.info('Claude Code CLI is not installed. Installing now...');
+      const s = p.spinner();
+      s.start('Installing Claude Code (curl -fsSL https://claude.ai/install.sh | bash)…');
+      const install = spawnSync('bash', ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], {
+        stdio: 'pipe',
+        encoding: 'utf8',
+      });
+      const localBin = path.join(os.homedir(), '.local', 'bin');
+      if (!(process.env.PATH ?? '').split(':').includes(localBin)) {
+        process.env.PATH = `${localBin}:${process.env.PATH ?? ''}`;
+      }
+      if (install.status !== 0 || spawnSync('which', ['claude'], { encoding: 'utf8' }).status !== 0) {
+        s.stop(k.red('Failed to install Claude Code CLI.'));
+        p.log.error(
+          'Install it manually (curl -fsSL https://claude.ai/install.sh | bash), then paste the token below.',
+        );
+      } else {
+        s.stop(k.green('Claude Code CLI installed ✓'));
+      }
+    }
+    if (spawnSync('which', ['claude'], { encoding: 'utf8' }).status === 0) {
+      p.log.step('A browser window will open to sign in with your Claude account.');
+      p.log.message(dim('  Running: claude setup-token'));
+      spawnSync('claude', ['setup-token'], { stdio: 'inherit', encoding: 'utf8' });
+    }
+  }
+
+  const pasted = ensure(
+    await p.password({
+      message: method === 'subscription' ? 'Paste the token printed above (sk-ant-oat…)' : 'Claude token or API key',
+      validate: (v) => (classifyClaudeSecret(v ?? '') ? undefined : 'Expected sk-ant-oat… or sk-ant-api…'),
+    }),
+  ) as string;
+  const credential = classifyClaudeSecret(pasted)!;
+  p.log.success(
+    credential.key === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'Claude subscription token saved ✓' : 'Claude API key saved ✓',
+  );
+  return credential;
+}
+
+// ─── Provider selection ───────────────────────────────────────────────────────
+
+async function setupProviders(existingEnv?: Map<string, string>): Promise<ProviderSetup> {
+  // Prefill from an existing/legacy install: clawbridge-agent wrote
+  // AGENT_PROVIDER=claude; this install writes DEFAULT_AGENT_PROVIDER.
+  const legacy = existingEnv?.get('AGENT_PROVIDER');
+  const previousDefault =
+    existingEnv?.get('DEFAULT_AGENT_PROVIDER') ?? (legacy && legacy !== 'codex' ? legacy : undefined);
+  const previousEnabled = existingEnv
+    ?.get('ENABLED_AGENT_PROVIDERS')
+    ?.split(',')
+    .map((v) => v.trim())
+    .filter((v): v is 'claude' | 'codex' => v === 'claude' || v === 'codex');
+
+  const providers = ensure(
+    await p.multiselect<'claude' | 'codex'>({
+      message: 'Which AI providers should your agents be able to use?',
+      options: [
+        { value: 'claude', label: 'Claude', hint: 'Claude Code — subscription or API key' },
+        { value: 'codex', label: 'Codex', hint: 'OpenAI Codex — ChatGPT subscription' },
+      ],
+      initialValues: previousEnabled?.length ? previousEnabled : ['claude', 'codex'],
+      required: true,
+    }),
+  ) as Array<'claude' | 'codex'>;
+
+  let defaultProvider = providers[0];
+  if (providers.length > 1) {
+    defaultProvider = ensure(
+      await p.select<'claude' | 'codex'>({
+        message: 'Default provider for new agents? (switch any agent later with /provider)',
+        options: [
+          { value: 'claude', label: 'Claude' },
+          { value: 'codex', label: 'Codex' },
+        ],
+        initialValue: previousDefault === 'claude' || previousDefault === 'codex' ? previousDefault : 'claude',
+      }),
+    ) as 'claude' | 'codex';
+  }
+
+  if (providers.includes('codex')) await setupCodexAuth();
+  const claudeCredential = providers.includes('claude') ? await setupClaudeAuth(existingEnv) : undefined;
+
+  return { providers, defaultProvider, claudeCredential };
 }
 
 function codexAuthExists(): boolean {
@@ -405,8 +558,8 @@ async function runFreshInstall(): Promise<void> {
   checkNodePrerequisites();
   p.log.step('Starting fresh install…');
 
-  // Step 1 — Auth
-  await setupCodexAuth();
+  // Step 1 — Providers + auth
+  const providerSetup = await setupProviders(parseEnvFile(path.join(os.homedir(), '.clawbridge', '.env')));
 
   // Step 2 — Channels
   type ChannelOption = { value: string; label: string; hint?: string };
@@ -447,6 +600,7 @@ async function runFreshInstall(): Promise<void> {
   // Generate .env
   const cfg: FreshConfig = {
     agentName,
+    providers: providerSetup,
     telegramToken,
     channels: channelChoices,
     hindsightDbPassword,
@@ -931,8 +1085,8 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
     }
   }
 
-  // Step A — Codex auth
-  await setupCodexAuth();
+  // Step A — Providers + auth (prefilled from the source install)
+  const migratedProviders = await setupProviders(sourceEnv);
 
   // Step B — Agent name
   const migratedAgentName = await promptAgentName(sourceEnv.get('ASSISTANT_NAME') ?? sourceEnv.get('AGENT_NAME'));
@@ -966,6 +1120,7 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
   // Step F — Generate complete .env
   const migratedCfg: FreshConfig = {
     agentName: migratedAgentName,
+    providers: migratedProviders,
     telegramToken: sourceEnv.get('TELEGRAM_BOT_TOKEN'),
     channels: migratedChannels,
     hindsightDbPassword: migratedHindsightDbPw ?? sourceEnv.get('HINDSIGHT_DB_PASSWORD'),

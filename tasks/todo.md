@@ -111,3 +111,25 @@ Implemented and verified.
 - `pnpm test` passed: 30 files, 240 tests.
 - `pnpm build` passed.
 - `git diff --check` passed.
+
+---
+
+# Dual provider: Claude + Codex in one install (branch `feat/dual-provider`)
+
+**Goal:** Any agent group or session can run on Claude (Claude Agent SDK + Claude Code) or Codex, in one image, switchable at runtime.
+
+- [x] Container: ship both providers (`providers/claude.ts` ported from clawbridge-agent, `@anthropic-ai/claude-agent-sdk` + lockfile, Dockerfile installs both CLIs behind `INSTALL_CLAUDE` / `INSTALL_CODEX`).
+- [x] Runner reads the host-resolved provider from `CLAWBRIDGE_PROVIDER` (previously per-session/group overrides never reached the container).
+- [x] Host: `src/providers/claude.ts` (settings.json + credential, OAuth preferred over API key), `providers/state-dir.ts` (`.claude-shared` / `.codex-shared` per provider), composed instructions mounted as both `AGENTS.md` and `CLAUDE.md`, duplicate `.codex` mount removed.
+- [x] Install default via `DEFAULT_AGENT_PROVIDER`; `AGENT_PROVIDER` stays a legacy migration marker.
+- [x] `/provider` host command (show / group / session / default) + provider line in `/status`.
+- [x] Host LLM calls (`extractor`, `reflection-agent`, `cross-client`, `error-handler`) go through `host-llm.ts` → `codex exec` or `claude -p`.
+- [x] Setup wizard: choose providers + default, Claude auth (`claude setup-token` or paste); doctor/verify/probe check each enabled provider; clawbridge-agent migration keeps Claude as the default.
+- [x] Tests: `codex-port.test.ts` → `provider-port.test.ts` (dual-provider invariants), new `host-llm.test.ts`, `host-commands/provider.test.ts`, migration carry-over test, Claude factory test.
+
+## Review
+
+- Host: `tsc` clean; vitest 250/252 pass. The 2 failures (`memory/hindsight.test.ts`) also fail on the base commit.
+- Runner: `bun install --frozen-lockfile` accepts the lockfile; `bun test` 23 pass / 6 fail. The same 6 fail on the base commit (missing `/shared` mount outside the container, session-state tests). The new Claude factory test passes.
+- Lint: 33 errors vs 34 on base, none in changed files.
+- **Not verified:** `docker build` of the image and a live Claude/Codex round-trip (no Docker on the dev machine). Hindsight's own LLM still uses `openai-codex`, so a Claude-only install needs Hindsight pointed at another LLM.

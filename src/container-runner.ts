@@ -19,6 +19,7 @@ import {
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupAgentsMd } from './agents-md-compose.js';
+import { providerStateDir, providerStateLayout } from './providers/state-dir.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
@@ -125,7 +126,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
-  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
+  const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
   const containerName = `clawbridge-v2-${agentGroup.folder}-${Date.now()}`;
   const args = await buildContainerArgs(mounts, containerName, agentGroup, containerConfig, provider, contribution);
 
@@ -276,7 +277,7 @@ export function killContainer(sessionId: string, reason: string): void {
  *   sessions.agent_provider
  *     → agent_groups.agent_provider
  *     → container.json `provider`
- *     → 'codex'
+ *     → install default (DEFAULT_AGENT_PROVIDER in ~/.clawbridge/.env, else 'codex')
  *
  * Pure so the precedence can be unit-tested without a DB or filesystem.
  */
@@ -309,6 +310,7 @@ function buildMounts(
   agentGroup: AgentGroup,
   session: Session,
   containerConfig: import('./container-config.js').ContainerConfig,
+  provider: string,
   providerContribution: ProviderContainerContribution,
 ): VolumeMount[] {
   const projectRoot = process.cwd();
@@ -318,8 +320,10 @@ function buildMounts(
   // is a no-op for groups that have spawned before.
   initGroupFilesystem(agentGroup);
 
-  // Sync skill symlinks based on container.json selection before mounting.
-  const stateDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.codex-shared');
+  // Per-group, per-provider CLI state (.claude-shared → /home/node/.claude,
+  // .codex-shared → /home/node/.codex). Sync skill symlinks based on
+  // container.json selection before mounting.
+  const stateDir = providerStateDir(agentGroup.id, provider);
   syncSkillSymlinks(stateDir, containerConfig);
 
   // Compose AGENTS.md fresh every spawn from the shared base, enabled skill
@@ -330,7 +334,7 @@ function buildMounts(
   const sessDir = sessionDir(agentGroup.id, session.id);
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
 
-  // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .codex/)
+  // Session folder at /workspace (contains inbound.db, outbound.db, outbox/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
 
   // Agent group folder at /workspace/agent (RW for working files + AGENTS.local.md)
@@ -346,13 +350,16 @@ function buildMounts(
   // Composer-managed artifact — nested RO mount on top of RW group dir.
   // `_composed.md` is the machine-managed entry point (underscore prefix =
   // internal, do not edit) regenerated from the shared base + fragments on
-  // every spawn. It is mounted as AGENTS.md inside the container so the
-  // Codex CLI picks it up from /workspace/agent automatically. The
-  // user-editable persona file `AGENTS.local.md` is read at compose time
-  // and inlined into the composed output.
+  // every spawn. The same file is mounted as AGENTS.md (read by Codex) and
+  // CLAUDE.md (read by Claude Code), so both providers get identical
+  // instructions. Everything is inlined — no `@import`s — which both CLIs
+  // handle. The user-editable persona file `AGENTS.local.md` is read at
+  // compose time and inlined into the composed output.
   const composedAgentsMd = path.join(groupDir, '_composed.md');
   if (fs.existsSync(composedAgentsMd)) {
-    mounts.push({ hostPath: composedAgentsMd, containerPath: '/workspace/agent/AGENTS.md', readonly: true });
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+      mounts.push({ hostPath: composedAgentsMd, containerPath: `/workspace/agent/${name}`, readonly: true });
+    }
   }
 
   // Global memory directory — always read-only.
@@ -361,10 +368,10 @@ function buildMounts(
     mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
   }
 
-  // Per-group state dir at /home/node/.codex (codex sessions, settings,
-  // skill symlinks). Inlined fragments live inside AGENTS.md already, so
-  // no separate /app/AGENTS.md mount is needed.
-  mounts.push({ hostPath: stateDir, containerPath: '/home/node/.codex', readonly: false });
+  // Provider CLI state dir (sessions, settings, skill symlinks). Inlined
+  // fragments live inside the composed file already, so no separate shared
+  // base mount is needed.
+  mounts.push({ hostPath: stateDir, containerPath: providerStateLayout(provider).containerPath, readonly: false });
 
   // Shared agent-runner source — read-only, same code for all groups.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
@@ -374,7 +381,7 @@ function buildMounts(
   const sharedSrc = path.join(projectRoot, 'src', 'shared');
   mounts.push({ hostPath: sharedSrc, containerPath: '/shared', readonly: true });
 
-  // Shared skills — read-only, symlinks in .codex-shared/skills/ point here.
+  // Shared skills — read-only, symlinks in the provider state dir's skills/ point here.
   const skillsSrc = path.join(projectRoot, 'container', 'skills');
   if (fs.existsSync(skillsSrc)) {
     mounts.push({ hostPath: skillsSrc, containerPath: '/app/skills', readonly: true });
@@ -395,12 +402,12 @@ function buildMounts(
 }
 
 /**
- * Sync skill symlinks in .codex-shared/skills/ to match the container.json
+ * Sync skill symlinks in the provider state dir's skills/ to match the container.json
  * selection. Each symlink points to a container path (/app/skills/<name>)
  * so it's dangling on the host but valid inside the container.
  */
-function syncSkillSymlinks(codexDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
-  const skillsDir = path.join(codexDir, 'skills');
+function syncSkillSymlinks(stateDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
+  const skillsDir = path.join(stateDir, 'skills');
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
   }
@@ -498,6 +505,11 @@ async function buildContainerArgs(
   // Everything ClawBridge-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Host-resolved provider (session → group → container.json → default).
+  // The runner prefers this over container.json so per-session overrides
+  // actually take effect.
+  args.push('-e', `CLAWBRIDGE_PROVIDER=${provider}`);
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
@@ -505,9 +517,10 @@ async function buildContainerArgs(
     }
   }
 
-  // Codex uses subscription OAuth from /home/node/.codex/auth.json.
-  // Do not inject OPENAI_API_KEY/CODEX_API_KEY here; the container provider
-  // deliberately keeps the runtime on subscription auth to avoid API billing.
+  // Credentials come only from the provider contribution above: Claude gets
+  // its OAuth token (or API key) from ~/.clawbridge/.env; Codex uses
+  // subscription OAuth from /home/node/.codex/auth.json. Never inject
+  // OPENAI_API_KEY/CODEX_API_KEY — that would flip Codex to API billing.
 
   // Per-group env vars from container.json — injected after credential vars.
   // Values may contain ${VAR} or ${VAR:-default} references to ~/.clawbridge/.env.

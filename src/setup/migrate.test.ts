@@ -72,4 +72,19 @@ describe('clawbridge-codex migration detection', () => {
       path: path.join(home, '.openclaw'),
     });
   });
+
+  it('keeps the legacy provider as DEFAULT_AGENT_PROVIDER when migrating clawbridge-agent in place', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-inplace-home-'));
+    const cbHome = path.join(home, '.clawbridge');
+    fs.mkdirSync(cbHome, { recursive: true });
+    fs.writeFileSync(path.join(cbHome, '.env'), 'AGENT_PROVIDER=claude\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-x\n');
+
+    const { runMigration } = await loadMigrateWithHome(home);
+    await runMigration({ type: 'clawbridge', path: cbHome }, {} as never, []);
+
+    const env = fs.readFileSync(path.join(cbHome, '.env'), 'utf-8');
+    expect(env).toMatch(/^AGENT_PROVIDER=codex$/m);
+    expect(env).toMatch(/^DEFAULT_AGENT_PROVIDER=claude$/m);
+    expect(env).toContain('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-x');
+  });
 });

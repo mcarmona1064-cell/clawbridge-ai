@@ -134,11 +134,14 @@ export async function run(_args: string[]): Promise<void> {
     // Docker not running
   }
 
-  // 3. Check Codex subscription OAuth. Runtime auth is intentionally not
-  // satisfied by API-key env vars because the Codex provider strips them.
+  // 3. Check provider auth. Either provider being authenticated is enough
+  // for an agent round-trip. Codex needs subscription OAuth (API-key env
+  // vars are stripped by the Codex provider); Claude needs the token from
+  // `claude setup-token` (or an API key) in ~/.clawbridge/.env.
   let credentials = 'missing';
   const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
-  if (fs.existsSync(codexAuthPath)) {
+  const claudeCreds = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  if (fs.existsSync(codexAuthPath) || claudeCreds.CLAUDE_CODE_OAUTH_TOKEN || claudeCreds.ANTHROPIC_API_KEY) {
     credentials = 'configured';
   }
 

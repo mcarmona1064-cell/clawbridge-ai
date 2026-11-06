@@ -13,12 +13,13 @@
  *     outbound.db       ← container-owned session DB
  *     .heartbeat        ← container touches for liveness detection
  *     outbox/           ← outbound files
- *     agent/            ← agent group folder (AGENTS.md, container.json, working files)
+ *     agent/            ← agent group folder (AGENTS.md = CLAUDE.md, container.json, working files)
  *       container.json  ← per-group config (RO nested mount)
  *     global/           ← shared global memory (RO)
  *   /app/src/           ← shared agent-runner source (RO)
  *   /app/skills/        ← shared skills (RO)
  *   /home/node/.codex/  ← Codex OAuth/session state + skill symlinks (RW)
+ *   /home/node/.claude/ ← Claude Code session state + skill symlinks (RW)
  */
 
 import fs from 'fs';
@@ -47,9 +48,10 @@ async function main(): Promise<void> {
 
   // Runtime-generated system-prompt addendum: agent identity (name) plus
   // the live destinations map. Everything else (capabilities, per-module
-  // instructions, per-channel formatting) is loaded by Codex from
-  // /workspace/agent/AGENTS.md — the composed entry inlines the shared
-  // base and each enabled module's fragment. Per-group memory lives in
+  // instructions, per-channel formatting) is loaded by the provider CLI from
+  // /workspace/agent/AGENTS.md (Codex) or /workspace/agent/CLAUDE.md (Claude
+  // Code) — both are the same composed file, which inlines the shared base
+  // and each enabled module's fragment. Per-group memory lives in
   // /workspace/agent/AGENTS.local.md (inlined at compose time).
   const instructions = buildSystemPromptAddendum(config.assistantName || undefined);
 

@@ -18,30 +18,38 @@ function walk(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-describe('Codex port regression checks', () => {
-  it('keeps runtime LLM calls routed through configured runtime providers or Codex CLI OAuth', () => {
-    const codexSubscriptionFiles = [
+describe('Dual-provider (Claude + Codex) regression checks', () => {
+  it('routes host-side LLM calls through provider CLIs, never raw API calls', () => {
+    const hostLlmCallers = [
       'src/error-handler.ts',
       'src/memory/extractor.ts',
       'src/memory/reflection-agent.ts',
       'src/memory/cross-client.ts',
     ];
 
-    for (const rel of codexSubscriptionFiles) {
+    for (const rel of hostLlmCallers) {
       const content = read(rel);
-      expect(content, rel).toContain('runCodexPrompt');
+      expect(content, rel).toContain('runHostPrompt');
       expect(content, rel).not.toMatch(
-        /OPENAI_API_KEY|api\.openai\.com\/v1\/chat\/completions|Authorization:\s*`Bearer/,
+        /OPENAI_API_KEY|ANTHROPIC_API_KEY|api\.openai\.com|api\.anthropic\.com|Authorization:\s*`Bearer/,
       );
     }
+
+    const hostLlm = read('src/host-llm.ts');
+    expect(hostLlm).toContain('runCodexPrompt');
+    expect(hostLlm).toContain('runClaudePrompt');
 
     const codexCli = read('src/codex-cli.ts');
     expect(codexCli).toMatch(/execFile\(\s*'codex'/);
     expect(codexCli).toContain("'--sandbox', sandbox");
     expect(codexCli).toContain("sandbox = 'read-only'");
+
+    const claudeCli = read('src/claude-cli.ts');
+    expect(claudeCli).toMatch(/execFile\(\s*'claude'/);
+    expect(claudeCli).toContain("sandbox = 'read-only'");
   });
 
-  it('setup auth requires Codex subscription OAuth and does not accept/create API-key runtime auth', () => {
+  it('setup offers Claude and Codex, and never creates OpenAI API-key runtime auth', () => {
     const auth = read('setup/auth.ts');
 
     expect(auth).toMatch(/\.codex['"],\s*['"]auth\.json/);
@@ -52,11 +60,12 @@ describe('Codex port regression checks', () => {
     expect(auth).not.toMatch(/writeEnvKey/);
     expect(auth).not.toMatch(/CREATED:\s*true/);
 
-    for (const rel of ['src/doctor.ts', 'setup/register.ts', 'setup/probe.sh', 'src/setup/index.ts']) {
-      const content = read(rel);
-      expect(content, rel).not.toMatch(/ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|claude setup-token|sk-ant/);
-    }
-
+    // Setup offers both providers; doctor checks auth for each enabled one.
+    const wizard = read('src/setup/index.ts');
+    expect(wizard).toContain('setupProviders');
+    expect(wizard).toContain('claude setup-token');
+    expect(wizard).toContain('DEFAULT_AGENT_PROVIDER=');
+    expect(read('src/doctor.ts')).toContain('Claude auth');
     expect(read('src/doctor.ts')).toContain('~/.codex/auth.json');
     expect(read('setup/register.ts')).toContain('AGENTS.local.md');
   });
@@ -121,13 +130,14 @@ describe('Codex port regression checks', () => {
     expect(setupWizard).toContain("value: 'clawbridge'");
   });
 
-  it('writes and mounts AGENTS.md instead of Claude Code persona files', () => {
+  it('mounts one composed instruction file as both AGENTS.md and CLAUDE.md', () => {
     expect(read('src/group-init.ts')).toContain('AGENTS.local.md');
-    expect(read('src/group-init.ts')).not.toMatch(/CLAUDE_CODE_|settings\.json/);
 
     const runner = read('src/container-runner.ts');
-    expect(runner).toContain('/workspace/agent/AGENTS.md');
-    expect(runner).not.toContain('/workspace/agent/CLAUDE.md');
+    expect(runner).toContain("['AGENTS.md', 'CLAUDE.md']");
+    expect(runner).toContain('/workspace/agent/${name}');
+    expect(runner).toContain('CLAWBRIDGE_PROVIDER=');
+    expect(runner).toContain('providerStateDir(agentGroup.id, provider)');
   });
 
   it('does not keep tracked backup files with stale Claude-era auth logic', () => {
@@ -135,26 +145,41 @@ describe('Codex port regression checks', () => {
     expect(fs.existsSync(path.join(ROOT, 'src/env.ts.bak'))).toBe(false);
   });
 
-  it('keeps active source/setup/integration code free of direct Anthropic credentials', () => {
+  it('confines Claude credentials to the Claude provider/auth files and never calls the Anthropic API directly', () => {
     const scannedRoots = ['src', 'setup', 'integrations', 'container/agent-runner/src'].map((rel) =>
       path.join(ROOT, rel),
     );
-    const allowedLegacyFiles = new Set([
-      path.join(ROOT, 'src/setup/migrate.ts'), // migration must detect legacy Claude env/files to import old installs
-      path.join(ROOT, 'src/agents-md-compose.ts'), // migration comments/paths rename CLAUDE.md -> AGENTS.local.md
-      path.join(ROOT, 'src/codex-port.test.ts'), // this test contains the forbidden strings as regex fixtures
-    ]);
-    const forbidden =
-      /api\.anthropic\.com|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|sk-ant|claude-opus|claude-haiku|Claude Code SDK|CLAUDE_CODE_/;
+    const claudeAuthFiles = new Set(
+      [
+        'src/claude-cli.ts', // resolves the Claude credential for host-side `claude -p`
+        'src/providers/claude.ts', // passes the credential into claude containers
+        'src/setup/index.ts', // setup wizard writes the token to ~/.clawbridge/.env
+        'src/setup/migrate.ts', // migration detects legacy Claude env/files
+        'src/doctor.ts', // reports Claude auth status
+        'setup/verify.ts',
+        'setup/probe.sh',
+        'container/agent-runner/src/providers/claude.ts', // Claude Code env tuning (CLAUDE_CODE_*)
+      ].map((rel) => path.join(ROOT, rel)),
+    );
+    const credentialPattern = /ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|sk-ant|CLAUDE_CODE_/;
+    const directApi = /api\.anthropic\.com/;
 
-    const offenders = scannedRoots
+    const files = scannedRoots
       .flatMap((root) => walk(root))
       .filter((file) => /\.(ts|tsx|js|sh|md|ya?ml)$/.test(file))
-      .filter((file) => !allowedLegacyFiles.has(file))
-      .filter((file) => forbidden.test(fs.readFileSync(file, 'utf8')))
+      // Tests use fake credentials as fixtures.
+      .filter((file) => !/\.test\.ts$/.test(file));
+
+    const credentialOffenders = files
+      .filter((file) => !claudeAuthFiles.has(file))
+      .filter((file) => credentialPattern.test(fs.readFileSync(file, 'utf8')))
+      .map((file) => path.relative(ROOT, file));
+    const directApiOffenders = files
+      .filter((file) => directApi.test(fs.readFileSync(file, 'utf8')))
       .map((file) => path.relative(ROOT, file));
 
-    expect(offenders).toEqual([]);
+    expect(credentialOffenders).toEqual([]);
+    expect(directApiOffenders).toEqual([]);
   });
 
   it('setup service registration detects macOS, Linux systemd, root systemd, and nohup fallback', () => {
@@ -174,21 +199,29 @@ describe('Codex port regression checks', () => {
     expect(migrate).toContain("if (type === 'clawbridge') continue");
   });
 
-  it('keeps container active runtime free of Anthropic/Claude runtime artifacts', () => {
-    const activeContainerFiles = [
-      ...walk(path.join(ROOT, 'container', 'agent-runner', 'src')),
-      path.join(ROOT, 'container', 'agent-runner', 'package.json'),
-      path.join(ROOT, 'container', 'Dockerfile'),
-    ].filter((file) => fs.existsSync(file));
+  it('ships both providers in the container and keeps each SDK confined to its provider module', () => {
+    const barrel = read('container/agent-runner/src/providers/index.ts');
+    expect(barrel).toContain("import './claude.js';");
+    expect(barrel).toContain("import './codex.js';");
 
-    const forbidden =
-      /@anthropic-ai|api\.anthropic\.com|ANTHROPIC_[A-Z0-9_]*|CLAUDE_CODE_[A-Z0-9_]*|Claude Code|claude-code/i;
-    const offenders = activeContainerFiles
-      .filter((file) => /\.(ts|tsx|js|json|md)$/.test(file) || path.basename(file) === 'Dockerfile')
-      .filter((file) => forbidden.test(fs.readFileSync(file, 'utf8')))
+    const dockerfile = read('container/Dockerfile');
+    expect(dockerfile).toContain('ARG INSTALL_CLAUDE=true');
+    expect(dockerfile).toContain('ARG INSTALL_CODEX=true');
+    expect(dockerfile).toContain('@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}');
+    expect(dockerfile).toContain('@openai/codex@${CODEX_VERSION}');
+
+    expect(read('container/agent-runner/src/config.ts')).toContain('process.env.CLAWBRIDGE_PROVIDER');
+
+    const sdkImporters = walk(path.join(ROOT, 'container', 'agent-runner', 'src'))
+      .filter((file) => /\.ts$/.test(file))
+      .filter((file) => /from '@anthropic-ai\//.test(fs.readFileSync(file, 'utf8')))
       .map((file) => path.relative(ROOT, file));
+    expect(sdkImporters).toEqual(['container/agent-runner/src/providers/claude.ts']);
 
-    expect(offenders).toEqual([]);
+    // The Codex provider must keep stripping API keys so it stays on subscription OAuth.
+    const codexProvider = read('container/agent-runner/src/providers/codex.ts');
+    expect(codexProvider).toContain("delete out['OPENAI_API_KEY']");
+    expect(codexProvider).toContain("delete out['CODEX_API_KEY']");
   });
 
   it('keeps upgrade/update pointed at the codex package', () => {

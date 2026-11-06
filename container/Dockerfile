@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 # ClawBridge Agent Container
-# Runs the Codex CLI in an isolated Linux VM with browser automation.
+# Runs Claude Code (via the Claude Agent SDK) and/or the Codex CLI in an
+# isolated Linux VM with browser automation. Which provider a session uses is
+# decided by the host at spawn time (CLAWBRIDGE_PROVIDER).
 #
 # Runtime split:
 #   - agent-runner (our TypeScript code): Bun, mounted RO at /app/src by host
-#   - globally-installed Node CLIs (codex, agent-browser, vercel): pnpm + Node
+#   - globally-installed Node CLIs (claude-code, codex, agent-browser, vercel): pnpm + Node
 #
 # Source is never baked in — /app/src is provided by a shared read-only
 # bind mount at runtime (see src/container-runner.ts). Source-only changes
@@ -16,9 +18,15 @@ FROM node:22-slim
 # CJK fonts add ~200MB. Opt in only if you render Chinese/Japanese/Korean text.
 ARG INSTALL_CJK_FONTS=false
 
+# Agent providers baked into the image. Both default on so any agent group can
+# switch provider without a rebuild. Set one to false for a slimmer image.
+ARG INSTALL_CLAUDE=true
+ARG INSTALL_CODEX=true
+
 # Pin CLI versions for reproducibility. Bump deliberately — unpinned installs
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
+ARG CLAUDE_CODE_VERSION=2.1.116
 ARG CODEX_VERSION=0.124.0
 ARG AGENT_BROWSER_VERSION=0.27.0
 ARG VERCEL_VERSION=53.3.0
@@ -86,22 +94,68 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # deliberately; unpinned global installs can break all rebuilt containers in
 # lockstep.
 #
-# only-built-dependencies gates pnpm's supply-chain policy. agent-browser has a
-# postinstall build step.
+# only-built-dependencies gates pnpm's supply-chain policy:
+#   - agent-browser has a postinstall build step.
+#   - @anthropic-ai/claude-code's postinstall downloads the native Claude
+#     binary. Without the allowlist the SDK fails at spawn time with
+#     "native binary not found".
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \
+    echo "only-built-dependencies[]=@anthropic-ai/claude-code" >> /root/.npmrc && \
     pnpm install -g "vercel@${VERCEL_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "agent-browser@${AGENT_BROWSER_VERSION}"
 
-# Codex CLI
+# ---- Claude Code CLI (provider: claude) ------------------------------------
+# If the global `claude` entry is a stub, point it at the native binary the
+# platform-specific optional dependency shipped.
 RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "@openai/codex@${CODEX_VERSION}"
+    if [ "$INSTALL_CLAUDE" = "true" ]; then \
+      pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+      if ! claude --version >/dev/null 2>&1; then \
+        echo "claude binary is a stub — locating native binary" && \
+        NATIVE=$(find /pnpm -path '*/@anthropic-ai/claude-code-linux-*/claude' -type f -perm /111 2>/dev/null | head -1) && \
+        if [ -n "$NATIVE" ] && [ "$NATIVE" != "/pnpm/bin/claude" ]; then \
+          echo "Found native binary at $NATIVE" && \
+          ln -sfn "$NATIVE" /pnpm/bin/claude; \
+        else \
+          CLAUDE_PKG=$(find /pnpm -path "*/@anthropic-ai/claude-code" -maxdepth 8 -type d 2>/dev/null | head -1) && \
+          [ -n "$CLAUDE_PKG" ] && cd "$CLAUDE_PKG" && node scripts/postinstall.js 2>&1 || true; \
+        fi; \
+      fi; \
+    else \
+      echo "INSTALL_CLAUDE=false — skipping Claude Code CLI"; \
+    fi
+
+# `bun install` resolves @anthropic-ai/claude-agent-sdk's optional native deps
+# to the *musl* variant even on this glibc-based node:22-slim image, and the
+# musl-linked binary fails to exec. Replace it with a symlink to the
+# glibc-correct native binary pnpm fetched above (same version).
+RUN set -e; \
+    if [ "$INSTALL_CLAUDE" != "true" ]; then exit 0; fi; \
+    REAL=$(find /pnpm -path '*/@anthropic-ai/claude-code-linux-*/claude' -type f 2>/dev/null | head -1); \
+    if [ -z "$REAL" ]; then \
+      echo "WARN: native claude binary not found under /pnpm — skipping SDK symlink fix"; \
+    else \
+      for d in /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*; do \
+        [ -d "$d" ] || continue; \
+        ln -sfn "$REAL" "$d/claude"; \
+        echo "Linked $d/claude -> $REAL"; \
+      done; \
+    fi
+
+# ---- Codex CLI (provider: codex) --------------------------------------------
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    if [ "$INSTALL_CODEX" = "true" ]; then \
+      pnpm install -g "@openai/codex@${CODEX_VERSION}"; \
+    else \
+      echo "INSTALL_CODEX=false — skipping Codex CLI"; \
+    fi
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

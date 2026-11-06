@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
-import { runCodexPrompt } from './codex-cli.js';
+import { hostLlmLabel, hostLlmLoginHint, runHostPrompt } from './host-llm.js';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -172,35 +172,32 @@ async function pollForFixIt(afterMessageId: number): Promise<boolean> {
   return false;
 }
 
-// ── Codex CLI diagnosis ──────────────────────────────────────────────────────
+// ── Provider CLI diagnosis ───────────────────────────────────────────────────
 
 export async function getDiagnosis(error: Error, fileContext: string): Promise<string> {
+  const label = hostLlmLabel();
   const prompt =
     `Error: ${error.message}\n` +
     `Stack: ${error.stack || '(no stack)'}\n\n` +
     `File content:\n${fileContext}\n\n` +
     `Diagnose this runtime error in 2-3 sentences. Suggest the specific minimal fix. ` +
-    `Use the local Codex CLI OAuth subscription session; do not require API-key billing.`;
+    `Use the local ${label} subscription session; do not require API-key billing.`;
 
   try {
-    const text = await runCodexPrompt(prompt, { sandbox: 'read-only', timeout: 120_000 });
-    return text || '(empty Codex CLI diagnosis)';
+    const text = await runHostPrompt(prompt, { sandbox: 'read-only', timeout: 120_000 });
+    return text || `(empty ${label} diagnosis)`;
   } catch (metaErr) {
     const err = metaErr as Error & { stderr?: string };
     const detail = (err.stderr || err.message || '').trim();
-    console.error('[error-handler] Failed to call Codex CLI for diagnosis:', metaErr);
-    return `Codex CLI diagnosis unavailable${detail ? `: ${detail}` : ''}. Run: codex login --device-auth`;
+    console.error(`[error-handler] Failed to call ${label} for diagnosis:`, metaErr);
+    return `${label} diagnosis unavailable${detail ? `: ${detail}` : ''}. Run: ${hostLlmLoginHint()}`;
   }
 }
 
-// ── Apply fix via Codex CLI ──────────────────────────────────────────────────
+// ── Apply fix via provider CLI ───────────────────────────────────────────────
 
 async function applyFix(error: Error, fileContext: string): Promise<void> {
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-
     const prompt =
       `Fix this runtime error:\n\n` +
       `Error: ${error.message}\n` +
@@ -208,11 +205,8 @@ async function applyFix(error: Error, fileContext: string): Promise<void> {
       `File content:\n${fileContext}\n\n` +
       `Apply the minimal fix needed to resolve this error. Edit the file in place.`;
 
-    log.info('[error-handler] Applying auto-fix via Codex CLI');
-    await execFileAsync('codex', ['exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', prompt], {
-      timeout: 120_000,
-      cwd: process.cwd(),
-    });
+    log.info(`[error-handler] Applying auto-fix via ${hostLlmLabel()}`);
+    await runHostPrompt(prompt, { sandbox: 'workspace-write', timeout: 120_000, cwd: process.cwd() });
     log.info('[error-handler] Auto-fix applied, restarting...');
 
     // Restart: re-exec current process

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  ClawBridge Codex — self-hosted, multi-channel AI agents powered by OpenAI Codex.
+  ClawBridge — self-hosted, multi-channel AI agents powered by Claude or OpenAI Codex.
 </p>
 
 <p align="center">
@@ -59,8 +59,8 @@ To migrate from an existing OpenClaw or NanoClaw install, choose the migration p
 ## Features
 
 - 🤖 **Multi-channel AI agents** — Telegram, WhatsApp, Discord, Slack, and more
-- 🤖 **OpenAI Codex CLI integration** — agents run through `@openai/codex` inside isolated containers
-- 🔐 **Subscription OAuth** — setup runs `codex login --device-auth`; the runtime avoids accidental API-key billing
+- 🤖 **Claude and Codex in one install** — each agent group (or session) runs on Claude Code or the OpenAI Codex CLI; switch with `/provider`
+- 🔐 **Subscription auth for both** — `claude setup-token` and `codex login --device-auth`; the runtime avoids accidental API-key billing
 - 🧠 **Optional semantic memory** — Hindsight retain/recall/reflect memory can be enabled during setup
 - 🔌 **Connect your tools** — Google, HubSpot, Slack, and more via MCP
 - 👁 **Vision and document analysis** via GPT-4o
@@ -73,20 +73,34 @@ To migrate from an existing OpenClaw or NanoClaw install, choose the migration p
 ## Architecture
 
 ```
-messaging apps → host process (router) → inbound.db → container (Bun, Codex) → outbound.db → host process (delivery) → messaging apps
+messaging apps → host process (router) → inbound.db → container (Bun, Claude or Codex) → outbound.db → host process (delivery) → messaging apps
 ```
 
-A single Node host orchestrates per-session agent containers. Agents run in Docker with explicit filesystem mounts. Codex auth is copied from host `~/.codex/auth.json` into the per-agent-group `.codex` state directory and mounted at `/home/node/.codex`; channel tokens and host-only settings live in `~/.clawbridge/.env`. See [docs/architecture.md](docs/architecture.md) for the full writeup.
+A single Node host orchestrates per-session agent containers. Agents run in Docker with explicit filesystem mounts. Each provider keeps its own per-agent-group state directory (`.claude-shared` → `/home/node/.claude`, `.codex-shared` → `/home/node/.codex`). Codex auth is copied from host `~/.codex/auth.json`; the Claude token is passed only to Claude containers; channel tokens and host-only settings live in `~/.clawbridge/.env`. See [docs/architecture.md](docs/architecture.md) for the full writeup.
 
-## AI Provider
+## AI Providers
 
-ClawBridge uses OpenAI Codex via the official `@openai/codex` CLI. Setup installs the CLI if needed and runs:
+ClawBridge ships both providers in one agent image, so any agent can run on either:
 
-```bash
-codex login --device-auth
-```
+| Provider | Runtime in the container | Sign-in |
+|---|---|---|
+| `claude` | Claude Agent SDK driving Claude Code | `claude setup-token` (subscription), or an `ANTHROPIC_API_KEY` |
+| `codex` | `codex exec --json` / `codex exec resume --json` | `codex login --device-auth` (ChatGPT subscription) |
 
-Agent containers run `codex exec --json` / `codex exec resume --json`. The Codex subprocess strips `OPENAI_API_KEY`, `CODEX_API_KEY`, and `OPENAI_BASE_URL` from its environment so the agent runtime stays on subscription OAuth instead of silently switching to API-key billing.
+Setup asks which providers to enable and which one is the default (`DEFAULT_AGENT_PROVIDER` in `~/.clawbridge/.env`). The provider for each run is resolved in this order:
+
+1. the session override (`/provider claude session`)
+2. the agent group setting (`/provider codex`)
+3. `"provider"` in the group's `container.json`
+4. `DEFAULT_AGENT_PROVIDER`
+
+`/provider` with no arguments shows the current provider and where it comes from; `/provider default` clears the overrides. Switching stops the running agent so the next message starts it on the new provider. Each provider resumes its own conversation history.
+
+Both CLIs read the same composed instructions: the host mounts one file as both `AGENTS.md` and `CLAUDE.md`. Per-group persona and notes live in `AGENTS.local.md`.
+
+The Codex subprocess strips `OPENAI_API_KEY`, `CODEX_API_KEY`, and `OPENAI_BASE_URL` so it stays on subscription OAuth. For Claude, a subscription token always wins over an API key, and only one is passed in.
+
+Host-side helper calls (memory extraction, reflection, error diagnosis) go through the CLI of `HOST_LLM_PROVIDER` (defaults to `DEFAULT_AGENT_PROVIDER`). To build a smaller image with only one CLI, set `INSTALL_CLAUDE=false` or `INSTALL_CODEX=false` when running `container/build.sh`.
 
 ## Setup, health checks, and upgrades
 

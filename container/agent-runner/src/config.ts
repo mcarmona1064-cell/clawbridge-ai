@@ -37,7 +37,10 @@ export function loadConfig(): RunnerConfig {
   }
 
   _config = {
-    provider: (raw.provider as string) || 'codex',
+    // Host-resolved provider wins (session → agent group → container.json →
+    // install default). container.json alone can't express per-session
+    // overrides, so the host passes the final answer as CLAWBRIDGE_PROVIDER.
+    provider: process.env.CLAWBRIDGE_PROVIDER || (raw.provider as string) || 'codex',
     assistantName: (raw.assistantName as string) || '',
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',

@@ -7,13 +7,14 @@
 import fs2 from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR } from '../../config.js';
-import { getAllAgentGroups } from '../../db/agent-groups.js';
+import { GROUPS_DIR, SUPPORTED_AGENT_PROVIDERS } from '../../config.js';
+import { readContainerConfig } from '../../container-config.js';
+import { getAllAgentGroups, getAgentGroup, updateAgentGroup } from '../../db/agent-groups.js';
 import { getAllAgentHealth } from '../../db/agent-health.js';
 import { COMMAND_REGISTRY } from '../../shared/commands.js';
-import { getPendingApproval, getPendingApprovalsByDeliveryChannel } from '../../db/sessions.js';
+import { getPendingApproval, getPendingApprovalsByDeliveryChannel, updateSession } from '../../db/sessions.js';
 import { getDb, hasTable } from '../../db/connection.js';
-import { isContainerRunning, killContainer } from '../../container-runner.js';
+import { isContainerRunning, killContainer, resolveProviderName } from '../../container-runner.js';
 import { notifyAgent } from '../approvals/index.js';
 import { dispatchResponse } from '../../response-registry.js';
 import type { InboundEvent } from '../../channels/adapter.js';
@@ -59,6 +60,8 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return handleAgents(ctx, write);
       case '/health':
         return handleHealth(ctx, write);
+      case '/provider':
+        return handleProvider(ctx, write);
       default:
         write('Unknown host command: ' + ctx.command);
     }
@@ -146,6 +149,13 @@ function handleStatus(ctx: HostCommandContext, write: WriteResponse): void {
       '\n' +
       'Container: ' +
       (running ? 'running' : s.container_status) +
+      '\n' +
+      'Provider: ' +
+      resolveProviderName(
+        s.agent_provider,
+        ctx.agentGroup.agent_provider,
+        readContainerConfig(ctx.agentGroup.folder).provider,
+      ) +
       '\n' +
       'Last active: ' +
       lastActive,
@@ -296,6 +306,63 @@ function handleHealth(_ctx: HostCommandContext, write: WriteResponse): void {
   }
 
   write(lines.join('\n'));
+}
+
+/**
+ * /provider                      → show the effective provider and where it comes from
+ * /provider claude|codex         → switch this agent group (clears this session's override)
+ * /provider claude|codex session → switch only this session
+ * /provider default              → clear group + session overrides (back to container.json / install default)
+ *
+ * A running container is stopped so the next message respawns it on the new provider.
+ */
+function handleProvider(ctx: HostCommandContext, write: WriteResponse): void {
+  const [rawTarget, rawScope] = ctx.args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const group = getAgentGroup(ctx.agentGroup.id) ?? ctx.agentGroup;
+  const containerProvider = readContainerConfig(group.folder).provider;
+
+  if (!rawTarget) {
+    const effective = resolveProviderName(ctx.session.agent_provider, group.agent_provider, containerProvider);
+    const source = ctx.session.agent_provider
+      ? 'session override'
+      : group.agent_provider
+        ? 'agent group setting'
+        : containerProvider
+          ? 'container.json'
+          : 'install default';
+    write(
+      `Provider: ${effective} (${source})\n` +
+        `Available: ${SUPPORTED_AGENT_PROVIDERS.join(', ')}\n` +
+        'Switch with /provider <name> [session] or reset with /provider default',
+    );
+    return;
+  }
+
+  let note: string;
+  if (rawTarget === 'default' || rawTarget === 'reset') {
+    updateAgentGroup(group.id, { agent_provider: null });
+    updateSession(ctx.session.id, { agent_provider: null });
+    note = `Provider overrides cleared. Now using ${resolveProviderName(null, null, containerProvider)}.`;
+  } else if (!(SUPPORTED_AGENT_PROVIDERS as readonly string[]).includes(rawTarget)) {
+    write(`Unknown provider "${rawTarget}". Available: ${SUPPORTED_AGENT_PROVIDERS.join(', ')}`);
+    return;
+  } else if (rawScope === 'session') {
+    updateSession(ctx.session.id, { agent_provider: rawTarget });
+    note = `This session now uses ${rawTarget}.`;
+  } else if (rawScope) {
+    write('Usage: /provider claude|codex [session] or /provider default');
+    return;
+  } else {
+    updateAgentGroup(group.id, { agent_provider: rawTarget });
+    updateSession(ctx.session.id, { agent_provider: null });
+    note = `Agent group "${group.name}" now uses ${rawTarget}.`;
+  }
+
+  if (isContainerRunning(ctx.session.id)) {
+    killContainer(ctx.session.id, 'provider switched via /provider');
+    note += ' The running agent was stopped and will restart on your next message.';
+  }
+  write(note);
 }
 
 function timeSince(iso: string): string {

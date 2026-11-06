@@ -191,6 +191,16 @@ probe_codex_auth() {
   fi
 }
 OPENAI_SECRET=$(probe_codex_auth)
+
+# Check for a Claude credential (token from `claude setup-token`, or an API key).
+probe_claude_auth() {
+  if grep -qE '^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=.+' "$HOME/.clawbridge/.env" 2>/dev/null; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+CLAUDE_SECRET=$(probe_claude_auth)
 DISPLAY_NAME=$(probe_display_name "$OS")
 
 END_S=$(date +%s)
@@ -204,6 +214,7 @@ HOST_DEPS: ${HOST_DEPS}
 DOCKER: ${DOCKER_STATUS}
 IMAGE_PRESENT: ${IMAGE_PRESENT}
 OPENAI_SECRET: ${OPENAI_SECRET}
+CLAUDE_SECRET: ${CLAUDE_SECRET}
 SERVICE_STATUS: ${SERVICE_STATUS}
 INFERRED_DISPLAY_NAME: ${DISPLAY_NAME}
 ELAPSED_MS: ${ELAPSED_MS}

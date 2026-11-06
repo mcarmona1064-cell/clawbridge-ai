@@ -752,22 +752,30 @@ export async function runMigration(
 
   // clawbridge-agent → clawbridge-codex is an in-place migration: source is
   // the same ~/.clawbridge/ data dir we'd be migrating *into*. No copies
-  // needed — just flip AGENT_PROVIDER so the next service start picks up the
-  // codex docker image and codex provider modules.
+  // needed. Flip the legacy AGENT_PROVIDER marker to codex (so this install
+  // is no longer detected as clawbridge-agent) and carry the old provider
+  // forward as DEFAULT_AGENT_PROVIDER, so existing agents keep running on
+  // Claude. Both providers ship in one image; switch per group with
+  // /provider.
   if (source.type === 'clawbridge') {
-    emit('provider-swap', 'Switching AGENT_PROVIDER to codex in ~/.clawbridge/.env');
+    emit('provider-swap', 'Marking ~/.clawbridge as migrated (keeping your current provider as the default)');
     const envPath = path.join(CLAWBRIDGE_HOME, '.env');
     if (fs.existsSync(envPath)) {
       let envContent = fs.readFileSync(envPath, 'utf-8');
-      const providerLine = /^AGENT_PROVIDER=.*$/m;
+      const providerLine = /^AGENT_PROVIDER=(.*)$/m;
+      const previous = (envContent.match(providerLine)?.[1] ?? '').trim().replace(/^['"]|['"]$/g, '');
       if (providerLine.test(envContent)) {
         envContent = envContent.replace(providerLine, 'AGENT_PROVIDER=codex');
       } else {
         envContent = envContent.trimEnd() + '\nAGENT_PROVIDER=codex\n';
       }
+      const keepDefault = previous && previous !== 'codex' ? previous : '';
+      if (keepDefault && !/^DEFAULT_AGENT_PROVIDER=/m.test(envContent)) {
+        envContent = envContent.trimEnd() + `\nDEFAULT_AGENT_PROVIDER=${keepDefault}\n`;
+      }
       fs.writeFileSync(envPath, envContent, 'utf-8');
     }
-    emit('provider-swap', 'Done. Re-run `clawbridge-codex setup` (or restart the service) to pick up the codex image.');
+    emit('provider-swap', 'Done. Re-run `clawbridge-codex setup` (or restart the service) to pick up the new image.');
     return result;
   }
 

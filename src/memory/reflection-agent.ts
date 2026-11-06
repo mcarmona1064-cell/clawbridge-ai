@@ -1,5 +1,5 @@
 import { log } from '../log.js';
-import { runCodexPrompt } from '../codex-cli.js';
+import { runHostPrompt } from '../host-llm.js';
 import { upsertMemory } from './db.js';
 import { SEGMENT_DEFAULTS } from './types.js';
 import type { Memory } from './types.js';
@@ -51,7 +51,7 @@ Rules:
 
   let insights: RawInsight[];
   try {
-    const textBlock = await runCodexPrompt(`${systemPrompt}\n\nMemories:\n${dump}\n\nReturn JSON only.`, {
+    const textBlock = await runHostPrompt(`${systemPrompt}\n\nMemories:\n${dump}\n\nReturn JSON only.`, {
       sandbox: 'read-only',
       timeout: 120_000,
     });

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { log } from '../log.js';
-import { runCodexPrompt } from '../codex-cli.js';
+import { runHostPrompt } from '../host-llm.js';
 import { getMemories } from './db.js';
 
 // ── Keyword overlap helper ────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ Format as markdown with bullet points. Max 300 words. Be specific and actionable
 
   let report: string;
   try {
-    report = await runCodexPrompt(`${systemPrompt}\n\n${userPrompt}\n\nReturn markdown only.`, {
+    report = await runHostPrompt(`${systemPrompt}\n\n${userPrompt}\n\nReturn markdown only.`, {
       sandbox: 'read-only',
       timeout: 120_000,
     });

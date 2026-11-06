@@ -6,7 +6,7 @@ import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from 
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TZ']);
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TZ', 'DEFAULT_AGENT_PROVIDER']);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
@@ -28,7 +28,24 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
 
-export const AGENT_PROVIDER = 'codex' as const;
+export const SUPPORTED_AGENT_PROVIDERS = ['claude', 'codex'] as const;
+export type AgentProviderName = (typeof SUPPORTED_AGENT_PROVIDERS)[number];
+
+/**
+ * Install-wide default provider, used when neither the session, the agent
+ * group nor container.json names one. Set DEFAULT_AGENT_PROVIDER=claude|codex
+ * in ~/.clawbridge/.env. (AGENT_PROVIDER in .env is a legacy marker the
+ * migration code uses to recognise old clawbridge-agent installs, so it is
+ * deliberately not read here.)
+ */
+export const AGENT_PROVIDER: string = normalizeProvider(
+  process.env.DEFAULT_AGENT_PROVIDER || envConfig.DEFAULT_AGENT_PROVIDER,
+);
+
+export function normalizeProvider(value: string | null | undefined): AgentProviderName {
+  const v = (value || '').trim().toLowerCase();
+  return (SUPPORTED_AGENT_PROVIDERS as readonly string[]).includes(v) ? (v as AgentProviderName) : 'codex';
+}
 // Install slug — stamped onto every spawned container via --label so
 // cleanupOrphans only reaps containers from this install, not peers.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);

@@ -766,19 +766,41 @@ async function checkChannels(env: Map<string, string>, autoFix: boolean): Promis
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 function checkProvider(env: Map<string, string>): void {
-  // Report current provider
-  pass('AGENT_PROVIDER', AGENT_PROVIDER);
+  // Report the install default, and check auth for every enabled provider.
+  pass('Default provider', AGENT_PROVIDER);
+  const enabled = (env.get('ENABLED_AGENT_PROVIDERS') ?? AGENT_PROVIDER)
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+  if (!enabled.includes(AGENT_PROVIDER)) enabled.push(AGENT_PROVIDER);
 
-  // Codex is authenticated via `codex login --device-auth` (writes ~/.codex/auth.json).
-  // Subscription OAuth is required for the agent runtime; API keys are not
-  // treated as a passing provider check because the Codex subprocess strips
-  // OPENAI_API_KEY/CODEX_API_KEY to avoid accidental API billing.
-  const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
-  const hasCodexAuth = fs.existsSync(codexAuthPath);
-  if (hasCodexAuth) {
-    pass('Codex auth', dim('~/.codex/auth.json present'));
-  } else {
-    fail('Codex auth', 'no ~/.codex/auth.json', 'run: codex login --device-auth');
+  if (enabled.includes('codex')) {
+    // Codex is authenticated via `codex login --device-auth` (writes ~/.codex/auth.json).
+    // Subscription OAuth is required for the agent runtime; API keys are not
+    // treated as a passing provider check because the Codex subprocess strips
+    // OPENAI_API_KEY/CODEX_API_KEY to avoid accidental API billing.
+    const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
+    if (fs.existsSync(codexAuthPath)) {
+      pass('Codex auth', dim('~/.codex/auth.json present'));
+    } else {
+      fail('Codex auth', 'no ~/.codex/auth.json', 'run: codex login --device-auth');
+    }
+  }
+
+  if (enabled.includes('claude')) {
+    // Claude runs from the token `claude setup-token` prints (preferred) or an
+    // API key, stored in ~/.clawbridge/.env and passed to claude containers only.
+    if (env.get('CLAUDE_CODE_OAUTH_TOKEN')) {
+      pass('Claude auth', dim('subscription token in ~/.clawbridge/.env'));
+    } else if (env.get('ANTHROPIC_API_KEY')) {
+      pass('Claude auth', dim('API key in ~/.clawbridge/.env (billed per token)'));
+    } else {
+      fail(
+        'Claude auth',
+        'no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in ~/.clawbridge/.env',
+        'run: claude setup-token, then add CLAUDE_CODE_OAUTH_TOKEN=… to ~/.clawbridge/.env',
+      );
+    }
   }
 
   // Auto-fix Hindsight LLM vars if HINDSIGHT_URL is set

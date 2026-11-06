@@ -6,6 +6,8 @@
 #
 # Reads optional build flags from ../.env:
 #   INSTALL_CJK_FONTS=true   — add Chinese/Japanese/Korean fonts (~200MB)
+#   INSTALL_CLAUDE=false     — leave the Claude Code CLI out of the image
+#   INSTALL_CODEX=false      — leave the Codex CLI out of the image
 # Callers can also override by exporting these vars directly.
 
 set -e
@@ -36,6 +38,18 @@ if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
     echo "CJK fonts: enabled (adds ~200MB)"
     BUILD_ARGS+=(--build-arg INSTALL_CJK_FONTS=true)
 fi
+
+# Provider CLIs baked into the image (both on by default).
+for flag in INSTALL_CLAUDE INSTALL_CODEX; do
+    if [ -z "${!flag:-}" ] && [ -f "../.env" ]; then
+        val="$(grep "^${flag}=" ../.env | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
+        [ -n "$val" ] && printf -v "$flag" '%s' "$val"
+    fi
+    if [ -n "${!flag:-}" ]; then
+        echo "${flag}=${!flag}"
+        BUILD_ARGS+=(--build-arg "${flag}=${!flag}")
+    fi
+done
 
 echo "Building ClawBridge agent container image..."
 
