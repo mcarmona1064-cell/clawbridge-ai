@@ -65,7 +65,7 @@ function mcpServerArgs(servers: Record<string, McpServerConfig>): string[] {
   return out;
 }
 
-function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
+export function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
   return [
     'exec',
     '--json',
@@ -78,8 +78,15 @@ function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServerConfi
   ];
 }
 
-function buildResumeArgs(threadId: string): string[] {
-  return ['exec', 'resume', '--json', '--skip-git-repo-check', threadId];
+/**
+ * Resume a thread with the SAME sandbox, working directory and MCP servers as
+ * a new one. In Codex 0.124 `--sandbox` and `-C` are `exec`-level options that
+ * are not global, so they must come before the `resume` subcommand; `-c`
+ * overrides and `--json` are global. Without them a resumed turn ran without
+ * the clawbridge MCP tools and with the default sandbox.
+ */
+export function buildResumeArgs(threadId: string, cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
+  return [...buildInitialArgs(cwd, mcpServers), 'resume', threadId];
 }
 
 interface CodexEvent {
@@ -150,7 +157,9 @@ export class CodexProvider implements AgentProvider {
         const prompt = pending!;
         pending = undefined;
 
-        const baseArgs = state.threadId ? buildResumeArgs(state.threadId) : buildInitialArgs(cwd, mcpServers);
+        const baseArgs = state.threadId
+          ? buildResumeArgs(state.threadId, cwd, mcpServers)
+          : buildInitialArgs(cwd, mcpServers);
         const args = [...baseArgs, '--', prompt];
 
         log(`Spawning: codex ${args.slice(0, baseArgs.length).join(' ')} -- <prompt>`);
