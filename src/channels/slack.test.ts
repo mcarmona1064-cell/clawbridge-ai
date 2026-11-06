@@ -202,3 +202,20 @@ describe('Slack adapter (end to end with a fake Slack)', () => {
     );
   });
 });
+
+describe('Slack app manifest', () => {
+  it('requests exactly the scopes the adapter uses, plus its events and interactivity', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { SLACK_BOT_SCOPES } = await import('./slack.js');
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'setup/channels/slack-app-manifest.json'), 'utf8'),
+    ) as {
+      oauth_config: { scopes: { bot: string[] } };
+      settings: { event_subscriptions: { bot_events: string[] }; interactivity: { is_enabled: boolean } };
+    };
+    expect([...manifest.oauth_config.scopes.bot].sort()).toEqual([...SLACK_BOT_SCOPES].sort());
+    expect(manifest.settings.event_subscriptions.bot_events).toContain('app_mention');
+    expect(manifest.settings.interactivity.is_enabled).toBe(true);
+  });
+});

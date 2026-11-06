@@ -1,25 +1,21 @@
 ---
 name: add-slack
-description: Add Slack channel integration via Chat SDK.
+description: Add the Slack channel integration (native Events API adapter shipped in trunk).
 ---
 
 # Add Slack Channel
 
-Adds Slack support via the Chat SDK bridge.
+Adds Slack support.
 
 ## Install
 
-ClawBridge doesn't ship channels in trunk. This skill copies the Slack adapter in from the `channels` branch.
+ClawBridge AI ships a native Slack adapter in trunk (`src/channels/slack.ts`: Events API inbound, Web API outbound, sender identity, approval buttons, threading, retries). **Do not overwrite it** with the older Chat-SDK adapter from the `channels` branch.
 
 ### Pre-flight (idempotent)
 
-Skip to **Credentials** if all of these are already in place:
+If `src/channels/slack.ts` exists and contains `SLACK_BOT_SCOPES`, the native adapter is installed: skip steps 1, 2 and 4, make sure step 3's import is present, then go to **Credentials**.
 
-- `src/channels/slack.ts` exists
-- `src/channels/index.ts` contains `import './slack.js';`
-- `@chat-adapter/slack` is listed in `package.json` dependencies
-
-Otherwise continue. Every step below is safe to re-run.
+Only for an old checkout without the native adapter, continue with every step below. Each is safe to re-run.
 
 ### 1. Fetch the channels branch
 

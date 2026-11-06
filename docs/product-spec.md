@@ -52,7 +52,7 @@
 | Dated facts + "memorize" process | `src/memory/` segmented extractor + Hindsight retain/recall/reflect | §4.4 `remember` tool with scope validation; facts carry source + date |
 | Scoped recall (acts as the asker) | Recall is unscoped within the group | §4.5 visibility tags + filtered banks |
 | History search | `ignored_message_policy='accumulate'` stores unmentioned messages per session only | §4.6 host FTS archive + `search_history` tool |
-| Skills with progressive disclosure, collections | `container/skills/*`; composer inlines `instructions.md` fragments for every skill (not lazy) | §4.7 skill index (one line each) + lazy load; collections; workspace-written skills |
+| Skills with progressive disclosure, collections | `container/skills/*`, symlinked into each provider's native skills dir and loaded lazily by the CLI (no skill ships an `instructions.md` today) | §4.7 skill index (one line each) + lazy load; collections; workspace-written skills |
 | Cache-stable prompt | Claude provider prepends this turn's recall to `systemPrompt.append`, which changes the prefix every query | §4.3 move per-turn context into the first user message |
 | Per-model prompt sections | none | §4.3 `container/providers/<provider>.md` fragment in the composer |
 | Condition-gated crons | Pre-task `script` exists, but runs *inside* the agent container after a full spawn (`poll-loop.ts` `applyPreTaskScripts`) | §5 gate on the host before spawning; add script-only crons |
