@@ -54,19 +54,50 @@ const AUTH_CREDS_PATH = path.join(process.cwd(), 'store', 'auth', 'creds.json');
 type AuthMethod = 'qr' | 'pairing-code';
 
 export async function runWhatsAppChannel(displayName: string): Promise<void> {
+  // The official Cloud API is the default. The WhatsApp Web route (Baileys)
+  // logs in as a personal number and can get that number banned, so it is
+  // opt-in with a plain warning.
+  const route = ensureAnswer(
+    await brightSelect({
+      message: 'How should the assistant connect to WhatsApp?',
+      options: [
+        {
+          value: 'cloud',
+          label: 'WhatsApp Business (official Cloud API)',
+          hint: 'recommended — no risk to your number',
+        },
+        {
+          value: 'web',
+          label: 'Personal number (WhatsApp Web, unofficial)',
+          hint: 'WhatsApp may ban numbers that use this',
+        },
+      ],
+    }),
+  ) as 'cloud' | 'web';
+  setupLog.userInput('whatsapp_route', route);
+  if (route === 'cloud') {
+    await runWhatsAppCloud();
+    return;
+  }
+  const sure = ensureAnswer(
+    await p.confirm({
+      message:
+        'The unofficial route signs in as a personal WhatsApp account. WhatsApp can permanently ban numbers that use unofficial clients. Continue anyway?',
+      initialValue: false,
+    }),
+  );
+  if (!sure) {
+    await runWhatsAppCloud();
+    return;
+  }
   const method = await askAuthMethod();
   const phone = method === 'pairing-code' ? await askPhoneNumber() : undefined;
 
-  const install = await runQuietChild(
-    'whatsapp-install',
-    'bash',
-    ['setup/add-whatsapp.sh'],
-    {
-      running: 'Installing the WhatsApp adapter…',
-      done: 'WhatsApp adapter installed.',
-      skipped: 'WhatsApp adapter already installed.',
-    },
-  );
+  const install = await runQuietChild('whatsapp-install', 'bash', ['setup/add-whatsapp.sh'], {
+    running: 'Installing the WhatsApp adapter…',
+    done: 'WhatsApp adapter installed.',
+    skipped: 'WhatsApp adapter already installed.',
+  });
   if (!install.ok) {
     await fail(
       'whatsapp-install',
@@ -115,13 +146,21 @@ export async function runWhatsAppChannel(displayName: string): Promise<void> {
     'init-first-agent',
     'pnpm',
     [
-      'exec', 'tsx', 'scripts/init-first-agent.ts',
-      '--channel', 'whatsapp',
-      '--user-id', platformId,
-      '--platform-id', platformId,
-      '--display-name', displayName,
-      '--agent-name', agentName,
-      '--role', role,
+      'exec',
+      'tsx',
+      'scripts/init-first-agent.ts',
+      '--channel',
+      'whatsapp',
+      '--user-id',
+      platformId,
+      '--platform-id',
+      platformId,
+      '--display-name',
+      displayName,
+      '--agent-name',
+      agentName,
+      '--role',
+      role,
     ],
     {
       running: `Connecting ${agentName} to WhatsApp…`,
@@ -173,7 +212,7 @@ async function askAuthMethod(): Promise<AuthMethod> {
 async function askPhoneNumber(): Promise<string> {
   p.note(
     [
-      "Enter your phone number the way WhatsApp expects it:",
+      'Enter your phone number the way WhatsApp expects it:',
       '',
       '  • Digits only — no +, spaces, or dashes',
       '  • Country code first, then the rest of the number',
@@ -222,9 +261,7 @@ async function runWhatsAppAuth(
   let qrLinesPrinted = 0;
 
   const extra =
-    method === 'pairing-code' && phone
-      ? ['--method', 'pairing-code', '--phone', phone]
-      : ['--method', 'qr'];
+    method === 'pairing-code' && phone ? ['--method', 'pairing-code', '--phone', phone] : ['--method', 'qr'];
 
   const result = await spawnStep(
     'whatsapp-auth',
@@ -290,10 +327,7 @@ async function runWhatsAppAuth(
   // Safety net — if the step died without emitting a terminal block, don't
   // leave the spinner running.
   if (spinnerActive) {
-    stopSpinner(
-      result.ok ? 'Done.' : 'Authentication ended unexpectedly.',
-      result.ok ? 0 : 1,
-    );
+    stopSpinner(result.ok ? 'Done.' : 'Authentication ended unexpectedly.', result.ok ? 0 : 1);
     if (!result.ok) dumpTranscriptOnFailure(result.transcript);
   }
 
@@ -311,9 +345,7 @@ async function renderQr(qr: string): Promise<string[]> {
   try {
     const QRCode = await import('qrcode');
     const qrText = await QRCode.toString(qr, { type: 'terminal', small: true });
-    const caption = k.dim(
-      '   Open WhatsApp → Settings → Linked Devices → Link a Device → scan.',
-    );
+    const caption = k.dim('   Open WhatsApp → Settings → Linked Devices → Link a Device → scan.');
     return [...qrText.trimEnd().split('\n'), '', caption];
   } catch {
     return ['QR code (raw): ' + qr];
@@ -358,18 +390,12 @@ async function restartService(): Promise<void> {
   const platform = process.platform;
   try {
     if (platform === 'darwin') {
-      spawnSync(
-        'launchctl',
-        ['kickstart', '-k', `gui/${process.getuid?.() ?? 501}/${getLaunchdLabel()}`],
-        { stdio: 'ignore' },
-      );
+      spawnSync('launchctl', ['kickstart', '-k', `gui/${process.getuid?.() ?? 501}/${getLaunchdLabel()}`], {
+        stdio: 'ignore',
+      });
     } else if (platform === 'linux') {
       const unit = getSystemdUnit();
-      const user = spawnSync(
-        'systemctl',
-        ['--user', 'restart', unit],
-        { stdio: 'ignore' },
-      );
+      const user = spawnSync('systemctl', ['--user', 'restart', unit], { stdio: 'ignore' });
       if (user.status !== 0) {
         spawnSync('sudo', ['systemctl', 'restart', unit], {
           stdio: 'ignore',
@@ -438,10 +464,7 @@ function writeAssistantHasOwnNumber(): void {
     contents = '';
   }
   if (/^ASSISTANT_HAS_OWN_NUMBER=/m.test(contents)) {
-    contents = contents.replace(
-      /^ASSISTANT_HAS_OWN_NUMBER=.*$/m,
-      'ASSISTANT_HAS_OWN_NUMBER=true',
-    );
+    contents = contents.replace(/^ASSISTANT_HAS_OWN_NUMBER=.*$/m, 'ASSISTANT_HAS_OWN_NUMBER=true');
   } else {
     if (contents.length > 0 && !contents.endsWith('\n')) contents += '\n';
     contents += 'ASSISTANT_HAS_OWN_NUMBER=true\n';
@@ -470,4 +493,17 @@ async function resolveAgentName(): Promise<string> {
   const value = (answer as string).trim() || DEFAULT_AGENT_NAME;
   setupLog.userInput('agent_name', value);
   return value;
+}
+
+/** Official route: the same checked walkthrough as `clawbridge-ai`, saved to .env. */
+async function runWhatsAppCloud(): Promise<void> {
+  const { runWhatsAppWizard } = await import('../../src/setup/channel-wizards.js');
+  const out = await runWhatsAppWizard();
+  if (!out) {
+    p.log.warn('WhatsApp skipped. You can connect it later from chat with /connect whatsapp.');
+    return;
+  }
+  const { setEnvValues } = await import('../../src/env.js');
+  setEnvValues(out.env);
+  p.note(out.next.join('\n'), 'Last step in Meta');
 }
