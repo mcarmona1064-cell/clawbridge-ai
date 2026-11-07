@@ -68,17 +68,29 @@ To migrate from an existing OpenClaw or NanoClaw install, choose the migration p
 
 ## Features
 
-- 🤖 **Multi-channel AI agents** — Telegram, WhatsApp, Discord, Slack, and more
-- 🤖 **Claude and Codex in one install** — each agent group (or session) runs on Claude Code or the OpenAI Codex CLI; switch with `/provider`
-- 🔐 **Subscription auth for both** — `claude setup-token` and `codex login --device-auth` (an Anthropic API key also works)
-- 🧠 **Optional semantic memory** — Hindsight retain/recall/reflect memory can be enabled during setup
-- 🔌 **Connect your tools** — Google, HubSpot, Slack, and more via MCP
-- 👁 **Vision and document analysis** via GPT-4o
-- 🔒 **Container-isolated, self-hosted** — your data stays yours, agents run in Docker sandboxes
-- 🛡️ **Prompt injection protection** — built-in guards against malicious message injection attacks
-- 🤝 **Multi-agent orchestration** — agents can delegate tasks, pass files, and run parallel workflows
-- ⚡ **Skills system** — browser automation, web search, scheduling, self-customization, and more
-- 🚀 **Migrate from OpenClaw or NanoClaw** in minutes
+- 💬 **One agent on every channel.** Slack, WhatsApp (official Cloud API), Telegram and Discord are first-class, with buttons, threads, formatting and files native to each. Teams, Google Chat, Webex, Matrix, Signal, iMessage and email are added through skills. See [docs/channels.md](docs/channels.md).
+- 🪄 **Set up in minutes, then never touch a terminal.**
+  - `clawbridge-ai` walks you through each channel and checks every credential.
+  - After that, `/connect`, `/onboard`, `/reply`, `/digest` and `/help` run everything from chat.
+- 🤖 **Claude and Codex in one install.** Switch with `/provider`, and choose how hard the agent thinks with `!fast`, `!deep` or `/model`.
+- 🔐 **Subscriptions, and keys on the host.**
+  - Sign in with `claude setup-token` and `codex login --device-auth`.
+  - The credential proxy gives containers placeholders only. `EGRESS_LOCKDOWN` makes the proxy their only way out.
+- 🧠 **Memory per conversation, plus team knowledge.** Team facts need an admin's approval. `/memory` shows, searches and forgets.
+- 🧩 **Your business apps.**
+  - GitHub, Linear, Jira, Notion, HubSpot, Stripe, Shopify, Gmail, Google Calendar, Drive, Sheets and custom APIs.
+  - Reads run directly. Changes need approval first, are idempotent, and come back with evidence. See [docs/integrations.md](docs/integrations.md).
+- ✅ **Approvals people trust.**
+  - Risk badges, scoped "Always allow" and `/permissions`.
+  - Approver and auditor roles.
+  - Approvals arrive in the chat you choose (`/notify-here`), even across apps once your accounts are linked with `/link`.
+- 🙅 **Honest by design.**
+  - Replies that claim things that didn't happen get corrected.
+  - Private-chat content needs approval before it reaches a group.
+  - Every security-relevant action goes into a hash-chained audit log.
+- 💸 **No surprise bills.** `/usage`, monthly budgets with alerts at 50/75/90/100%, and frequent jobs gated by condition scripts.
+- 📊 **Real work.** Data questions over your files (`query_data`), shareable report links, a browser you can take over for sign-ins, voice replies, and skills pinned to reviewed commits.
+- 🧪 **Checked every night.** A channel contract suite, plus an eval suite run on both providers (pass^3).
 
 ## Architecture
 

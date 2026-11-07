@@ -97,16 +97,16 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Milestone 4: capabilities
 
-- [ ] 4.1 **Integration SDK.** Integration SDK with host-held credentials and approval before sending.
-- [ ] 4.2 **Cheap crons.** Gated crons that are cheap to run.
-- [ ] 4.3 **Deliverables.** Deliverables sent as native files on each channel, plus signed hosted pages.
-- [ ] 4.4 **Media and voice.** Media in and voice out everywhere.
-- [ ] 4.5 **Takeover browser.**
-- [ ] 4.6 **DuckDB data.** Read-only DuckDB data access.
-- [ ] 4.7 **Skills library.** Pinned skills library.
-- [ ] 4.8 **Proactivity.** Opt-in proactivity.
-- [ ] 4.9 **Model routing.** Model routing presets.
-- [ ] 4.10 **Remaining channels.** Bring the remaining channels onto the contract suite.
+- [x] 4.1 **Integration SDK.** Integration SDK with host-held credentials and approval before sending.
+- [x] 4.2 **Cheap crons.** Gated crons that are cheap to run.
+- [x] 4.3 **Deliverables.** Deliverables sent as native files on each channel, plus signed hosted pages.
+- [x] 4.4 **Media and voice.** Media in and voice out everywhere.
+- [x] 4.5 **Takeover browser.**
+- [x] 4.6 **DuckDB data.** Read-only DuckDB data access.
+- [x] 4.7 **Skills library.** Pinned skills library.
+- [x] 4.8 **Proactivity.** Opt-in proactivity.
+- [x] 4.9 **Model routing.** Model routing presets.
+- [x] 4.10 **Remaining channels.** Bring the remaining channels onto the contract suite.
 
 ## Quality bar
 
@@ -302,4 +302,61 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 2. **Always allow:** with `allowHostExec`, ask the agent to run `npm test`. Tap "Always allow `npm test`", ask again, and it should run without a card. `/permissions` lists the rule.
 3. **Audience guard:** DM the agent "post 'hello' in #general". An approval card should appear first.
 4. **Memory:** `/memory`, then `/memory forget <id>`, then `/memory` again: the item should be gone.
+
+### Milestone 4 (pushed to `ai` main, 2026-11-07)
+
+**What changed for users (every channel unless noted)**
+
+- **Apps.**
+  - GitHub, Linear, Jira, Notion, HubSpot, Stripe, Shopify, Gmail, Calendar, Drive, Sheets and custom REST APIs, through `integration_request`. Credentials stay on the host.
+  - Reads run directly. Writes go to an approval card, are idempotent, and come back with an evidence link. Stripe and Shopify always ask.
+- **Thinking level.** `!fast`, `!deep`, `!normal` and `/model`: Haiku/Sonnet/Opus 5.5 on Claude, effort levels on Codex.
+- **Scheduling and digests.**
+  - Frequent jobs need a condition script, and jobs can't create recurring jobs.
+  - `/digest on 9:00`; quiet days post nothing.
+- **Deliverables and data.**
+  - `share_file` makes signed, expiring links for reports and pages.
+  - `query_data` runs read-only DuckDB over workspace files.
+- **Browser.** `browser_handoff` sends a private live link to take over for sign-ins. What the person types never reaches the agent.
+- **Skills.**
+  - `/skills install owner/repo@<sha>`, with a safety scan and an approval card.
+  - `/skills update` shows the diff.
+  - `propose_skill` records a procedure as a skill (record-to-skill).
+- **Voice and costs.**
+  - `/voice on` answers voice notes with voice, using a TTS key on the host.
+  - `/usage footer on` adds a cost footer.
+- **Rework.** `!shorter`, `!longer`, `!simpler`, `!redo`, `!undo`.
+- **Security.**
+  - `EGRESS_LOCKDOWN=on`: an internal Docker network whose only exit is a relay to the host proxy.
+  - `CODEX_AUTH_READONLY=on`.
+  - Slack guests and Slack Connect users are refused by default.
+- **Channels.** Teams, Google Chat and Webex keep buttons. The Chat SDK bridge runs the outbound contract suite.
+- **Setup.**
+  - `setup:auto` defaults WhatsApp to the Cloud API.
+  - `npx github:mcarmona1064-cell/clawbridge-ai` builds itself.
+  - Doctor checks Node 22 for Socket Mode.
+- **Evals.** 44 two-sided cases on Claude and Codex, pass^3 (88/88). They run on every PR and nightly (`.github/workflows/nightly.yml`), with the report kept as an artifact.
+
+**Verified:**
+- 507 host tests.
+- 88/88 eval runs.
+- Agent-runner tests: 43 pass, plus the 6 known failures and no new ones.
+- The real Claude Code CLI sends the proxy placeholder correctly.
+
+**Not verified live (no Docker on this machine, and no live accounts):**
+- The image build with DuckDB.
+- `query_data` running against real DuckDB.
+- The browser hand-off with real agent-browser.
+- The lockdown network and relay.
+- Live integration calls.
+- Real TTS.
+- Every platform flow.
+
+**Live checks**
+1. **Image:** `clawbridge-ai build-image`. Then, in a container, `duckdb --version`.
+2. **Apps:** put `GITHUB_TOKEN` in `.env` and ask "list open issues in acme/web". It should answer without a card. Then "open an issue titled Test": you should get an approval card, and the result should include a link.
+3. **Browser:** ask the agent to sign in somewhere. A hand-off link should arrive. Type the password on that page and press Done; the agent carries on.
+4. **Lockdown:** set `EGRESS_LOCKDOWN=on` and restart. `docker network inspect clawbridge-egress` should list the relay. From inside a container, `curl https://example.com` without the proxy should fail.
+5. **Skills:** `/skills install <owner/repo>@<sha>` → review the card → approve. Then `/skills`.
+6. **Evals:** `pnpm run eval` should give a pass^3 of 88/88 in `evals/report.json`.
 
