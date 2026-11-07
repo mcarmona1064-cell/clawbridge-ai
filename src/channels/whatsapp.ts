@@ -48,6 +48,8 @@ import type {
 } from './adapter.js';
 import type { NormalizedOption } from './ask-question.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { isOptedOut, optKeyword, recordInbound, replyWindow, setOptedOut } from './contact-state.js';
+import { audit } from '../audit.js';
 import {
   choiceId,
   emojiFor,
@@ -162,6 +164,34 @@ export function whatsappQuestionPayload(
   };
 }
 
+/** Free-form replies are allowed for this long after the person's last message. */
+export const REPLY_WINDOW_HOURS = 24;
+
+/** A send WhatsApp's rules forbid (opt-out, closed reply window). Not worth retrying blindly. */
+export class WhatsAppPolicyError extends Error {
+  constructor(reason: string) {
+    super(`WhatsApp policy: ${reason}`);
+    this.name = 'WhatsAppPolicyError';
+  }
+}
+
+/**
+ * Template message for sends outside the reply window. The template needs
+ * one body variable ({{1}}); WhatsApp forbids newlines and long runs of
+ * spaces in variables, so the summary is flattened and capped.
+ */
+export function templatePayload(name: string, lang: string, summary: string): Record<string, unknown> {
+  const text = toWhatsApp(summary).replace(/\s+/g, ' ').trim().slice(0, 900) || 'You have a new message.';
+  return {
+    type: 'template',
+    template: {
+      name,
+      language: { code: lang },
+      components: [{ type: 'body', parameters: [{ type: 'text', text }] }],
+    },
+  };
+}
+
 /** Cloud API media type for an outbound file. */
 export function whatsappMediaType(filename: string): 'image' | 'video' | 'audio' | 'document' {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
@@ -202,7 +232,11 @@ function createAdapter(): ChannelAdapter | null {
     'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
     'WHATSAPP_APP_SECRET',
     'WHATSAPP_GRAPH_VERSION',
+    'WHATSAPP_TEMPLATE_NAME',
+    'WHATSAPP_TEMPLATE_LANG',
   ]);
+  const templateName = env['WHATSAPP_TEMPLATE_NAME'];
+  const templateLang = env['WHATSAPP_TEMPLATE_LANG'] || 'en_US';
   const phoneNumberId = env['WHATSAPP_PHONE_NUMBER_ID'];
   const accessToken = env['WHATSAPP_ACCESS_TOKEN'];
   const verifyToken = env['WHATSAPP_WEBHOOK_VERIFY_TOKEN'];
@@ -343,8 +377,37 @@ function createAdapter(): ChannelAdapter | null {
     if (!from || !msgId || seen.checkAndAdd(msgId)) return;
     const platformId = namespacedPlatformId(CHANNEL_TYPE, from);
     lastInbound.set(platformId, msgId);
+    recordInbound(CHANNEL_TYPE, platformId);
     const senderId = `${CHANNEL_TYPE}:${from}`;
     const sender = names.get(from) || `+${from}`;
+
+    // STOP / START: honour opt-outs before anything reaches the agent.
+    const plain = msgType === 'text' ? ((msg['text'] as { body?: string } | undefined)?.body ?? '') : '';
+    const keyword = plain ? optKeyword(plain) : null;
+    if (keyword === 'out') {
+      setOptedOut(CHANNEL_TYPE, platformId, true);
+      audit('contact.opted_out', { target: platformId, channelType: CHANNEL_TYPE });
+      await sendMessage(from, {
+        type: 'text',
+        text: { body: "You're unsubscribed and won't get messages from me. Send START to talk again." },
+      }).catch((err) => log.warn('[whatsapp] opt-out confirmation failed', { err: (err as Error).message }));
+      return;
+    }
+    if (isOptedOut(CHANNEL_TYPE, platformId)) {
+      if (keyword === 'in') {
+        setOptedOut(CHANNEL_TYPE, platformId, false);
+        audit('contact.opted_in', { target: platformId, channelType: CHANNEL_TYPE });
+        await sendMessage(from, { type: 'text', text: { body: "Welcome back — I'm here. How can I help?" } }).catch(
+          (err) => log.warn('[whatsapp] opt-in confirmation failed', { err: (err as Error).message }),
+        );
+      } else {
+        await sendMessage(from, {
+          type: 'text',
+          text: { body: "You're unsubscribed, so I won't reply. Send START to talk again." },
+        }).catch(() => undefined);
+      }
+      return;
+    }
 
     // A tap on a reply button or list row answers a question card.
     if (msgType === 'interactive' || msgType === 'button') {
@@ -517,6 +580,32 @@ function createAdapter(): ChannelAdapter | null {
       const to = platformId.startsWith(`${CHANNEL_TYPE}:`) ? platformId.slice(`${CHANNEL_TYPE}:`.length) : platformId;
       const op = parseOutbound(message);
       let firstId: string | undefined;
+
+      if (isOptedOut(CHANNEL_TYPE, platformId)) {
+        audit('message.blocked', { target: platformId, channelType: CHANNEL_TYPE, detail: { reason: 'opted_out' } });
+        throw new WhatsAppPolicyError('the recipient opted out (sent STOP); nothing is sent until they send START');
+      }
+
+      // Outside the 24-hour window Meta only accepts approved templates.
+      if (replyWindow(CHANNEL_TYPE, platformId, REPLY_WINDOW_HOURS) === 'closed' && op.op !== 'reaction') {
+        if (!templateName) {
+          audit('message.blocked', {
+            target: platformId,
+            channelType: CHANNEL_TYPE,
+            detail: { reason: 'window_closed' },
+          });
+          throw new WhatsAppPolicyError(
+            "outside WhatsApp's 24-hour reply window and no WHATSAPP_TEMPLATE_NAME is set; the person must message first",
+          );
+        }
+        const summary =
+          op.op === 'question'
+            ? `${op.title}: ${op.question} Reply to see the options.`
+            : op.op === 'text' || op.op === 'edit'
+              ? op.text
+              : 'You have a new message.';
+        return sendMessage(to, templatePayload(templateName, templateLang, summary));
+      }
 
       if (op.op === 'reaction') {
         const emoji = emojiFor(op.emoji);

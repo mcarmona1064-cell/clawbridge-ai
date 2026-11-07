@@ -20,6 +20,7 @@ import { moduleEphemeralTasks } from './module-ephemeral-tasks.js';
 import { moduleApprovalsDecisions } from './module-approvals-decisions.js';
 import { migration015 } from './015-channel-layer.js';
 import { migration016 } from './016-audit-log.js';
+import { migration017 } from './017-contact-state.js';
 
 export interface Migration {
   version: number;
@@ -47,6 +48,7 @@ const migrations: Migration[] = [
   moduleApprovalsDecisions,
   migration015,
   migration016,
+  migration017,
 ];
 
 export function runMigrations(db: Database.Database): void {
