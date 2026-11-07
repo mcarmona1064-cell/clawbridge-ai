@@ -28,7 +28,6 @@ const FIX_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between fix attempts per com
 
 import { sendAdminAlert } from './shared/admin-alert.js';
 
-
 // ── Auto-heal cooldown ────────────────────────────────────────────────────────
 
 const lastFixAttempt = new Map<string, number>();

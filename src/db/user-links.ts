@@ -8,6 +8,7 @@
  * person keeps their role whichever channel they write from.
  */
 import { getDb, hasTable } from './connection.js';
+import { audit } from '../audit.js';
 
 function ready(): boolean {
   return hasTable(getDb(), 'user_links');
@@ -43,11 +44,14 @@ export function createUserLink(aliasId: string, primaryId: string, approvedBy: s
   getDb()
     .prepare(`INSERT OR REPLACE INTO user_links (alias_id, primary_id, linked_at, approved_by) VALUES (?, ?, ?, ?)`)
     .run(aliasId, primaryId, new Date().toISOString(), approvedBy);
+  audit('identity.linked', { actor: approvedBy, target: aliasId, detail: { primary: primaryId } });
 }
 
 export function removeUserLink(aliasId: string): boolean {
   if (!ready()) return false;
-  return getDb().prepare('DELETE FROM user_links WHERE alias_id = ?').run(aliasId).changes > 0;
+  const removed = getDb().prepare('DELETE FROM user_links WHERE alias_id = ?').run(aliasId).changes > 0;
+  if (removed) audit('identity.unlinked', { target: aliasId });
+  return removed;
 }
 
 /** SQL fragment and params for "user_id belongs to this person". */

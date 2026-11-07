@@ -31,15 +31,11 @@ export function getEphemeralTaskByAgentGroup(taskAgentGroupId: string): Ephemera
 }
 
 export function markEphemeralTaskReplied(id: string, result: string): void {
-  getDb()
-    .prepare("UPDATE ephemeral_tasks SET status = 'replied', result = ? WHERE id = ?")
-    .run(result, id);
+  getDb().prepare("UPDATE ephemeral_tasks SET status = 'replied', result = ? WHERE id = ?").run(result, id);
 }
 
 export function markEphemeralTaskCleaned(id: string): void {
-  getDb()
-    .prepare("UPDATE ephemeral_tasks SET status = 'cleaned_up' WHERE id = ?")
-    .run(id);
+  getDb().prepare("UPDATE ephemeral_tasks SET status = 'cleaned_up' WHERE id = ?").run(id);
 }
 
 export function getTasksToCleanup(): EphemeralTask[] {

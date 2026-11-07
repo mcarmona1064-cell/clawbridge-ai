@@ -1,5 +1,6 @@
 import type { PendingApproval, PendingQuestion, Session } from '../types.js';
 import { getDb, hasTable } from './connection.js';
+import { audit } from '../audit.js';
 
 // ── Sessions ──
 
@@ -172,6 +173,14 @@ export function createPendingApproval(
       status: 'pending',
       ...pa,
     });
+  if (result.changes > 0) {
+    audit('approval.requested', {
+      target: pa.approval_id,
+      agentGroupId: pa.agent_group_id ?? null,
+      channelType: pa.channel_type ?? null,
+      detail: { action: pa.action, deliveredTo: pa.platform_id ?? null },
+    });
+  }
   return result.changes > 0;
 }
 
@@ -195,6 +204,15 @@ export function recordApprovalDecision(
   getDb()
     .prepare('UPDATE pending_approvals SET status = ?, decided_by = ?, decided_at = ? WHERE approval_id = ?')
     .run(status, decidedBy, decidedAt, approvalId);
+  const row = getDb()
+    .prepare('SELECT action, agent_group_id FROM pending_approvals WHERE approval_id = ?')
+    .get(approvalId) as { action: string; agent_group_id: string | null } | undefined;
+  audit(status === 'expired' ? 'approval.expired' : 'approval.decided', {
+    actor: decidedBy,
+    target: approvalId,
+    agentGroupId: row?.agent_group_id ?? null,
+    detail: { action: row?.action ?? null, decision: status },
+  });
 }
 
 /** Pending approvals whose expires_at has passed. */

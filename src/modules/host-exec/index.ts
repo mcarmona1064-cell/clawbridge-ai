@@ -29,6 +29,7 @@ import { log } from '../../log.js';
 import { sessionDir } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { requestApproval, registerApprovalHandler, registerApprovalRejectionHandler } from '../approvals/index.js';
+import { audit } from '../../audit.js';
 
 const POLL_INTERVAL_MS = 250;
 
@@ -215,6 +216,10 @@ export async function applyApprovedHostExec({
     timeout: parsed.timeout,
     cwd: parsed.cwd,
   });
+  audit('host_exec.run', {
+    target: parsed.requestId,
+    detail: { command: parsed.command, cwd: parsed.cwd, approved: true, exitCode: response.exitCode },
+  });
   await writeHostExecApprovalResult(payload, response);
   notify(`host_exec command approved and executed: ${parsed.command}`);
   log.info('host_exec: approved command completed', { reqId: parsed.requestId, exitCode: response.exitCode });
@@ -232,6 +237,7 @@ export async function rejectHostExec({
     deniedResponse('host_exec command was rejected by admin approval.'),
   );
   notify(`host_exec command rejected: ${parsed.command}`);
+  audit('host_exec.denied', { target: parsed.requestId, detail: { command: parsed.command, reason: 'rejected' } });
 }
 
 async function requestHostExecApproval(session: Session, req: ExecRequest, resPath: string): Promise<boolean> {
@@ -323,6 +329,11 @@ async function processRequest(
         'host_exec is not enabled for this agent group (allowHostExec is false in container.json).',
       );
       log.warn('host_exec: rejected — allowHostExec is false', { reqId: req.id });
+      audit('host_exec.denied', {
+        target: req.id,
+        agentGroupId: session.agent_group_id,
+        detail: { command: req.command, reason: 'not_enabled' },
+      });
       writeAtomic(resPath, JSON.stringify(response));
       return;
     }
@@ -352,6 +363,11 @@ async function processRequest(
     log.info('host_exec: running', { reqId: req.id, command: req.command, cwd: req.cwd, timeout: req.timeout });
     response = await runCommand(req);
     log.info('host_exec: completed', { reqId: req.id, exitCode: response.exitCode });
+    audit('host_exec.run', {
+      target: req.id,
+      agentGroupId: session.agent_group_id,
+      detail: { command: req.command, cwd: req.cwd ?? null, approved: false, exitCode: response.exitCode },
+    });
     writeAtomic(resPath, JSON.stringify(response));
   } finally {
     inflight.delete(inflightKey);

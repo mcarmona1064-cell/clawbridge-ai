@@ -59,6 +59,11 @@ if (process.argv[2] === 'chat') {
   process.exit(0);
 }
 
+if (process.argv[2] === 'audit') {
+  const { runAuditCli } = await import('../audit-cli.js');
+  process.exit(runAuditCli(process.argv.slice(3)));
+}
+
 if (process.argv[2] === 'build-image') {
   console.log('Building ClawBridge agent container image…');
   const ok = await buildContainerImage();

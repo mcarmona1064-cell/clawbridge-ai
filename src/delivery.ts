@@ -28,6 +28,7 @@ import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './s
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
+import { audit } from './audit.js';
 
 function extractText(jsonContent: string): string {
   try {
@@ -435,6 +436,18 @@ async function deliverMessage(
     msg.content,
     files,
   );
+  audit('message.posted', {
+    target: msg.id,
+    agentGroupId: session.agent_group_id,
+    channelType: msg.channel_type,
+    detail: {
+      platformId: msg.platform_id,
+      threadId: msg.thread_id,
+      platformMessageId: platformMsgId ?? null,
+      kind: content.type === 'ask_question' ? 'card' : (content.operation ?? 'message'),
+      files: files?.length ?? 0,
+    },
+  });
   log.info('Message delivered', {
     id: msg.id,
     channelType: msg.channel_type,

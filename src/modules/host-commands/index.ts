@@ -20,6 +20,7 @@ import { saveTeamFact, validateTeamFact } from '../team-memory/index.js';
 import { dispatchResponse } from '../../response-registry.js';
 import type { InboundEvent } from '../../channels/adapter.js';
 import type { Session, MessagingGroup, AgentGroup } from '../../types.js';
+import { audit } from '../../audit.js';
 
 export interface HostCommandContext {
   command: string;
@@ -377,6 +378,14 @@ function handleProvider(ctx: HostCommandContext, write: WriteResponse): void {
     updateSession(ctx.session.id, { agent_provider: null });
     note = `Agent group "${group.name}" now uses ${rawTarget}.`;
   }
+
+  audit('provider.switched', {
+    actor: ctx.userId,
+    target: rawScope === 'session' ? ctx.session.id : group.id,
+    agentGroupId: group.id,
+    channelType: ctx.event.channelType,
+    detail: { provider: rawTarget, scope: rawScope === 'session' ? 'session' : 'agent_group' },
+  });
 
   if (isContainerRunning(ctx.session.id)) {
     killContainer(ctx.session.id, 'provider switched via /provider');

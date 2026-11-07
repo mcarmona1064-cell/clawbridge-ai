@@ -30,6 +30,7 @@ import {
   requestApproval,
   type ApprovalHandler,
 } from '../approvals/index.js';
+import { audit } from '../../audit.js';
 
 export const PROPOSE_TEAM_MEMORY_ACTION = 'propose_team_memory';
 export const MAX_TEAM_FACT_CHARS = 600;
@@ -82,6 +83,11 @@ export async function saveTeamFact(opts: {
       proposedBy: opts.proposedBy,
       approvedBy: opts.approvedBy,
     }),
+  });
+  audit('memory.team_write', {
+    actor: opts.approvedBy ?? opts.proposedBy ?? null,
+    agentGroupId: opts.agentGroupId,
+    detail: { origin: opts.origin, proposedBy: opts.proposedBy ?? null, chars: opts.fact.length },
   });
   log.info('[team-memory] fact saved', {
     agentGroupId: opts.agentGroupId,
