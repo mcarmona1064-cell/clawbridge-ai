@@ -12,7 +12,7 @@ import { runMigrations } from './db/migrations/index.js';
 import { grantRole } from './modules/permissions/db/user-roles.js';
 import { upsertUser } from './modules/permissions/db/users.js';
 import { budgetCommand, handleRecordUsage, usageCommand } from './modules/usage/index.js';
-import { budgetPercent, overBudget, parseBudget, recordUsage } from './usage.js';
+import { budgetPercent, costFooterFor, overBudget, parseBudget, recordUsage, setCostFooter } from './usage.js';
 import type { Session } from './types.js';
 
 const session = { id: 'sess-1', agent_group_id: 'ag-1' } as Session;
@@ -123,5 +123,22 @@ describe('usage ledger and budgets', () => {
       costUsd: 1.2,
     });
     expect(overBudget('ag-1')).toBe(true);
+  });
+
+  it('adds a cost footer once per turn when turned on for the conversation', () => {
+    recordUsage({
+      agentGroupId: 'ag-1',
+      sessionId: 'sess-1',
+      provider: 'claude',
+      inputTokens: 900,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0.012,
+    });
+    expect(costFooterFor('sess-1')).toBeNull();
+    setCostFooter('sess-1', true);
+    expect(costFooterFor('sess-1')).toBe('_· 1.2k tokens · ~$0.012_');
+    expect(costFooterFor('sess-1')).toBeNull();
   });
 });

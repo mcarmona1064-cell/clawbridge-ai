@@ -318,10 +318,8 @@ async function processQuery(
         // (send_message) mid-turn, or the message may not need a response
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
-        if (event.text) {
-          dispatchResultText(event.text, routing);
-        }
-        // Report what the turn used; the host keeps the ledger and budgets.
+        // Report what the turn used before the reply, so the host can add a
+        // cost footer to it; the host keeps the ledger and budgets.
         if (event.usage) {
           writeMessageOut({
             id: generateId(),
@@ -335,6 +333,9 @@ async function processQuery(
               ...event.usage,
             }),
           });
+        }
+        if (event.text) {
+          dispatchResultText(event.text, routing);
         }
       }
     }

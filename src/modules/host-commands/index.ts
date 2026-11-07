@@ -200,6 +200,14 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return;
       }
       case '/usage': {
+        const footerArg = /^footer\s+(on|off)$/i.exec(ctx.args.trim());
+        if (footerArg) {
+          const { setCostFooter } = await import('../../usage.js');
+          const on = footerArg[1].toLowerCase() === 'on';
+          setCostFooter(ctx.session.id, on);
+          write(on ? 'Each reply here will end with what it used.' : 'Cost footer off.');
+          return;
+        }
         const { usageCommand } = await import('../usage/index.js');
         write(usageCommand(ctx.agentGroup.id, ctx.userId));
         return;

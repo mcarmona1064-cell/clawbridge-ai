@@ -32,6 +32,7 @@ import { audit } from './audit.js';
 import { rewriteAgentError } from './friendly-errors.js';
 import { gateClaims, recordSessionAction } from './claim-gate.js';
 import { lastWasVoice, synthesize, voiceRepliesOn } from './voice-replies.js';
+import { costFooterFor } from './usage.js';
 import { sendAdminAlert } from './shared/admin-alert.js';
 
 function extractText(jsonContent: string): string {
@@ -464,6 +465,15 @@ async function deliverMessage(
   if (msg.kind === 'chat' && typeof content.text === 'string' && content.text.trim() === 'NO_DIGEST') {
     log.info('Digest had nothing new; not posted', { id: msg.id, sessionId: session.id });
     return undefined;
+  }
+
+  // Optional cost footer (/usage footer on), once per turn.
+  if (msg.kind === 'chat' && typeof content.text === 'string' && !content.operation && !content.agentError) {
+    const footer = costFooterFor(session.id);
+    if (footer) {
+      content.text = content.text + '\n\n' + footer;
+      outboundContent = JSON.stringify(content);
+    }
   }
 
   // A reply that claims a host action (scheduled, saved, posted) with no

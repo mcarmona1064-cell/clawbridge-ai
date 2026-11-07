@@ -231,3 +231,57 @@ export function parseBudget(arg: string): Budget | 'off' | null {
 export function logUsageFailure(err: unknown): void {
   log.warn('Usage record failed', { err });
 }
+
+// ── Cost footer (opt-in per conversation: /usage footer on) ──
+
+function prefsReady(): boolean {
+  try {
+    const db = getDb();
+    return (
+      hasTable(db, 'session_prefs') &&
+      (db.prepare('PRAGMA table_info(session_prefs)').all() as Array<{ name: string }>).some(
+        (c) => c.name === 'cost_footer',
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function costFooterOn(sessionId: string): boolean {
+  if (!prefsReady()) return false;
+  const row = getDb().prepare('SELECT cost_footer FROM session_prefs WHERE session_id = ?').get(sessionId) as
+    | { cost_footer: number }
+    | undefined;
+  return row?.cost_footer === 1;
+}
+
+export function setCostFooter(sessionId: string, on: boolean): void {
+  if (!prefsReady()) return;
+  getDb()
+    .prepare(
+      `INSERT INTO session_prefs (session_id, cost_footer, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET cost_footer = excluded.cost_footer, updated_at = excluded.updated_at`,
+    )
+    .run(sessionId, on ? 1 : 0, new Date().toISOString());
+}
+
+const footed = new Map<string, number>();
+
+/**
+ * Footer for the reply that follows a turn's usage record (tokens and the
+ * API-price estimate), once per turn. Null when off or no fresh usage.
+ */
+export function costFooterFor(sessionId: string, now = Date.now()): string | null {
+  if (!ready() || !costFooterOn(sessionId)) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id, at, input_tokens + output_tokens + cache_write_tokens AS billable, cost_usd FROM usage_ledger
+       WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
+    )
+    .get(sessionId) as { id: number; at: string; billable: number; cost_usd: number | null } | undefined;
+  if (!row || now - Date.parse(row.at) > 2 * 60 * 1000 || footed.get(sessionId) === row.id) return null;
+  footed.set(sessionId, row.id);
+  const cost = row.cost_usd !== null ? ' · ~$' + row.cost_usd.toFixed(3) : '';
+  return '_· ' + formatTokens(row.billable) + ' tokens' + cost + '_';
+}
