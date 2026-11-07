@@ -56,6 +56,14 @@ export function recordSessionAction(sessionId: string, action: string, now = Dat
   recent.set(sessionId, list);
 }
 
+/** Undo the most recent record of `action` (the host refused it after all). */
+export function retractSessionAction(sessionId: string, action: string): void {
+  const list = recent.get(sessionId);
+  if (!list) return;
+  const idx = list.map((a) => a.action).lastIndexOf(action);
+  if (idx >= 0) list.splice(idx, 1);
+}
+
 /** Claims in `text` (outside code) that have no matching recorded action. */
 export function unverifiedClaims(sessionId: string, text: string, now = Date.now()): ClaimKind[] {
   const prose = text.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');

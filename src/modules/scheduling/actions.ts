@@ -14,11 +14,56 @@ import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
+import { TIMEZONE } from '../../config.js';
+import { retractSessionAction } from '../../claim-gate.js';
 import { cancelTask, insertTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from './db.js';
+
+/** Recurring jobs that run more often than this per day must have a condition script. */
+export const MAX_UNGATED_RUNS_PER_DAY = 4;
+
+/** How many times a cron expression fires in the next 24 hours (capped at 1000). */
+export async function runsPerDay(recurrence: string, from = new Date()): Promise<number> {
+  const { CronExpressionParser } = await import('cron-parser');
+  const interval = CronExpressionParser.parse(recurrence, { tz: TIMEZONE, currentDate: from });
+  const end = from.getTime() + 24 * 60 * 60 * 1000;
+  let n = 0;
+  while (n < 1000) {
+    const next = interval.next().getTime();
+    if (next > end) break;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Why a schedule must be refused, or null if it is fine:
+ * - a scheduled job may not create recurring jobs (no runaway chains);
+ * - frequent jobs need a condition script, so they cost nothing when there is nothing to do.
+ */
+export async function scheduleRefusal(opts: {
+  recurrence: string | null;
+  script: string | null;
+  fromTask: boolean;
+}): Promise<string | null> {
+  if (!opts.recurrence) return null;
+  if (opts.fromTask) {
+    return 'A scheduled job cannot create another recurring job. Ask the person to set it up, or schedule a one-off reminder instead.';
+  }
+  let perDay: number;
+  try {
+    perDay = await runsPerDay(opts.recurrence);
+  } catch {
+    return `"${opts.recurrence}" is not a valid cron expression.`;
+  }
+  if (perDay > MAX_UNGATED_RUNS_PER_DAY && !opts.script) {
+    return `This job would run ${perDay} times a day. Jobs that run more than ${MAX_UNGATED_RUNS_PER_DAY} times a day need a condition script (the "script" field) that checks whether there is anything to do and only then wakes you, so quiet runs cost nothing. Add a script, or use a less frequent schedule.`;
+  }
+  return null;
+}
 
 export async function handleScheduleTask(
   content: Record<string, unknown>,
-  _session: Session,
+  session: Session,
   inDb: Database.Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
@@ -26,6 +71,14 @@ export async function handleScheduleTask(
   const script = content.script as string | null;
   const processAfter = content.processAfter as string;
   const recurrence = (content.recurrence as string) || null;
+
+  const refusal = await scheduleRefusal({ recurrence, script, fromTask: content.fromTask === true });
+  if (refusal) {
+    log.info('Scheduled task refused', { taskId, recurrence, reason: refusal });
+    retractSessionAction(session.id, 'schedule_task');
+    notifySession(session, `schedule_task ${taskId} was NOT created: ${refusal}`);
+    return;
+  }
 
   insertTask(inDb, {
     id: taskId,
@@ -110,4 +163,19 @@ export async function handleUpdateTask(
       );
     }
   }
+}
+
+/** Tell the agent (as a system message) and wake it so it can tell the person. */
+function notifySession(session: Session, text: string): void {
+  writeSessionMessage(session.agent_group_id, session.id, {
+    id: `sched-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'chat',
+    timestamp: new Date().toISOString(),
+    platformId: session.agent_group_id,
+    channelType: 'agent',
+    threadId: null,
+    content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
+  });
+  const fresh = getSession(session.id);
+  if (fresh) void wakeContainer(fresh).catch((err) => log.warn('Wake after schedule refusal failed', { err }));
 }

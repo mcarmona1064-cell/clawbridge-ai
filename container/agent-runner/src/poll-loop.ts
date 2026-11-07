@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
@@ -162,6 +163,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
+    // Tell the MCP tools whether this turn was started by a scheduled job,
+    // so a scheduled job can't schedule more recurring jobs.
+    writeCurrentTurn(keep.every((m) => m.kind === 'task'));
 
     const query = config.provider.query({
       prompt,
@@ -456,4 +460,15 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const CURRENT_TURN_FILE = '/workspace/.current_turn.json';
+
+/** Record what started the current turn (read by the scheduling tool). */
+function writeCurrentTurn(fromTask: boolean): void {
+  try {
+    fs.writeFileSync(CURRENT_TURN_FILE, JSON.stringify({ fromTask, at: new Date().toISOString() }));
+  } catch {
+    /* best effort; the host treats a missing flag as "not from a task" */
+  }
 }
