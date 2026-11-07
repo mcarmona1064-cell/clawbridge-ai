@@ -196,6 +196,7 @@ function createAdapter(): ChannelAdapter | null {
 
   let cfg: ChannelSetup | null = null;
   let botUserId: string | null = null;
+  let ownTeamId: string | null = null;
   let connected = false;
   const seen = new SeenSet();
   const userNames = new Map<string, { name: string | null; at: number }>();
@@ -216,6 +217,8 @@ function createAdapter(): ChannelAdapter | null {
   }
 
   /** Display name for a Slack user, cached; null if users.info fails. */
+  const userKinds = new Map<string, { guest: boolean; teamId: string | null }>();
+
   async function displayName(userId: string): Promise<string | null> {
     const cached = userNames.get(userId);
     if (cached && Date.now() - cached.at < USER_CACHE_TTL_MS) return cached.name;
@@ -230,11 +233,31 @@ function createAdapter(): ChannelAdapter | null {
         (user?.['real_name'] as string) ||
         (user?.['name'] as string) ||
         null;
+      userKinds.set(userId, {
+        guest: user?.['is_restricted'] === true || user?.['is_ultra_restricted'] === true,
+        teamId: (user?.['team_id'] as string) ?? null,
+      });
     } catch (err) {
       log.debug('[slack] users.info failed', { userId, err: (err as Error).message });
     }
     userNames.set(userId, { name, at: Date.now() });
     return name;
+  }
+
+  // Guests and people from other organisations (Slack Connect) are refused
+  // unless SLACK_GUEST_POLICY / SLACK_EXTERNAL_POLICY say "allow".
+  const policy = readEnvFile(['SLACK_GUEST_POLICY', 'SLACK_EXTERNAL_POLICY']);
+  const allowGuests = policy['SLACK_GUEST_POLICY'] === 'allow';
+  const allowExternal = policy['SLACK_EXTERNAL_POLICY'] === 'allow';
+  const refusedNoticeAt = new Map<string, number>();
+
+  /** Why this sender may not use the agent, or null. */
+  function refusal(userId: string, event: Record<string, unknown>): 'guest' | 'external' | null {
+    const kind = userKinds.get(userId);
+    const userTeam = (event['user_team'] as string | undefined) ?? kind?.teamId ?? null;
+    if (!allowExternal && ownTeamId && userTeam && userTeam !== ownTeamId) return 'external';
+    if (!allowGuests && kind?.guest) return 'guest';
+    return null;
   }
 
   async function downloadFiles(
@@ -372,6 +395,19 @@ function createAdapter(): ChannelAdapter | null {
     const threadTs = existingThread ?? (isGroup && mentionsBot ? ts : null);
 
     const sender = await displayName(userId);
+    const refused = refusal(userId, event);
+    if (refused) {
+      log.info('[slack] message from a guest or another organisation ignored', { userId, refused, channelId });
+      const last = refusedNoticeAt.get(userId) ?? 0;
+      if (!isGroup && Date.now() - last > 24 * 60 * 60 * 1000) {
+        refusedNoticeAt.set(userId, Date.now());
+        await api('chat.postMessage', {
+          channel: channelId,
+          ...markdownMessage('Sorry — I can only help members of this workspace. Ask an admin if you need access.'),
+        }).catch(() => undefined);
+      }
+      return;
+    }
     const inbound: InboundMessage = {
       id: ts,
       kind: 'chat',
@@ -463,6 +499,7 @@ function createAdapter(): ChannelAdapter | null {
       try {
         const auth = await api('auth.test', {});
         botUserId = (auth['user_id'] as string) ?? null;
+        ownTeamId = (auth['team_id'] as string) ?? null;
         log.info('[slack] Authenticated', { user: auth['user'], team: auth['team'] });
       } catch (err) {
         log.warn('[slack] Could not verify bot token', { err: (err as Error).message });

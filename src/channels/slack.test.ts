@@ -282,6 +282,62 @@ describe('Slack agent sessions', () => {
   });
 });
 
+describe('Slack guests and other organisations', () => {
+  it('ignores guests and Slack Connect users, and tells them once in a DM', async () => {
+    const posted: Array<{ method: string; body: Record<string, unknown> }> = [];
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = url.replace('https://slack.com/api/', '');
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      posted.push({ method, body });
+      if (method === 'auth.test') return jsonResponse({ ok: true, user_id: 'UBOT', team_id: 'T1' });
+      if (method === 'users.info') {
+        const guest = body.user === 'UGUEST';
+        return jsonResponse({
+          ok: true,
+          user: { team_id: 'T1', is_restricted: guest, profile: { display_name: 'X' } },
+        });
+      }
+      return jsonResponse({ ok: true, ts: '1.1' });
+    });
+    const adapter = factories.get('slack')!.factory() as ChannelAdapter;
+    const onInbound = vi.fn();
+    await adapter.setup({ onInbound, onAction: vi.fn(), onMetadata: vi.fn() } as unknown as ChannelSetup);
+    const send = (eventId: string, event: Record<string, unknown>) =>
+      handlers.get('slack')!(signed(JSON.stringify({ type: 'event_callback', event_id: eventId, event })));
+
+    await send('EvG1', { type: 'message', channel_type: 'im', channel: 'D1', user: 'UGUEST', ts: '10.1', text: 'hi' });
+    await send('EvX1', {
+      type: 'message',
+      channel_type: 'im',
+      channel: 'D2',
+      user: 'UEXT',
+      user_team: 'T999',
+      ts: '11.1',
+      text: 'hi',
+    });
+    await send('EvX2', {
+      type: 'message',
+      channel_type: 'im',
+      channel: 'D2',
+      user: 'UEXT',
+      user_team: 'T999',
+      ts: '12.1',
+      text: 'again',
+    });
+    await send('EvM1', { type: 'message', channel_type: 'im', channel: 'D3', user: 'UMEMBER', ts: '13.1', text: 'hi' });
+    await flush();
+    await flush();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onInbound).toHaveBeenCalledTimes(1);
+    expect(onInbound.mock.calls[0][2].content.senderId).toBe('slack:UMEMBER');
+    const notices = posted.filter(
+      (p) => p.method === 'chat.postMessage' && JSON.stringify(p.body).includes('only help members'),
+    );
+    expect(notices.map((n) => n.body.channel)).toEqual(['D1', 'D2']);
+  });
+});
+
 describe('Slack app manifest', () => {
   it('requests exactly the scopes the adapter uses, plus its events and interactivity', async () => {
     const fs = await import('fs');

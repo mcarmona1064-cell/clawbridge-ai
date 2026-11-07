@@ -65,6 +65,7 @@ Linking commands work before access checks, so a new account can link itself. Co
     - Pressing stop ends the running turn.
     - The manifest subscribes to `agent_session_stopped`, which Slack requires before it shows a working stop button.
     - In workspaces without agent sessions, the status line turns itself off.
+  - **Guests and other organisations.** Messages from guest accounts and from people in other workspaces (Slack Connect) are ignored, and the person is told once a day in a DM. `SLACK_GUEST_POLICY=allow` and `SLACK_EXTERNAL_POLICY=allow` change that.
 - **WhatsApp rules.**
   - Within 24 hours of the person's last message, the agent can reply freely. After that, WhatsApp only accepts pre-approved templates.
   - Set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to a **utility** template with one body variable, for example "Update from your assistant: {{1}}". Late messages, scheduled results and digests are then sent through it.
