@@ -42,11 +42,19 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mcarmona1064-cell/clawbridge
 
 One command checks/install prerequisites where supported, then launches the interactive setup wizard.
 
-If you already have Node installed:
+If you already have Node 22+ installed:
 
 ```bash
-npx clawbridge-ai
+npx github:mcarmona1064-cell/clawbridge-ai
 ```
+
+The repository is private: either command needs your GitHub sign-in, through `gh auth login` or a git credential helper. Without one, clone it first:
+
+```bash
+gh repo clone mcarmona1064-cell/clawbridge-ai && bash clawbridge-ai/clawbridge.sh
+```
+
+After setup, everything else happens in chat. `/help` lists the commands, and `/connect` adds a channel.
 
 If installed globally:
 
@@ -84,10 +92,10 @@ A single Node host orchestrates per-session agent containers. Agents run in Dock
 
 ClawBridge ships both providers in one agent image, so any agent can run on either:
 
-| Provider | Runtime in the container | Sign-in |
-|---|---|---|
-| `claude` | Claude Agent SDK driving Claude Code | `claude setup-token` (your Claude subscription), or an `ANTHROPIC_API_KEY` |
-| `codex` | `codex exec --json` / `codex exec resume --json` | `codex login --device-auth` (ChatGPT subscription) |
+| Provider | Runtime in the container                         | Sign-in                                                                    |
+| -------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `claude` | Claude Agent SDK driving Claude Code             | `claude setup-token` (your Claude subscription), or an `ANTHROPIC_API_KEY` |
+| `codex`  | `codex exec --json` / `codex exec resume --json` | `codex login --device-auth` (ChatGPT subscription)                         |
 
 Setup asks which providers to enable and which one is the default (`DEFAULT_AGENT_PROVIDER` in `~/.clawbridge/.env`). The provider for each run is resolved in this order:
 

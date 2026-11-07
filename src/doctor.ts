@@ -732,7 +732,14 @@ async function checkSlack(env: Map<string, string>, autoFix: boolean): Promise<v
     if (data.ok) {
       pass('Slack', `${data.team ?? ''} (bot_id: ${data.bot_id ?? 'unknown'})`);
       const appToken = env.get('SLACK_APP_TOKEN');
-      if (appToken) {
+      const nodeMajor = Number(process.versions.node.split('.')[0]);
+      if (appToken && nodeMajor < 22) {
+        fail(
+          'Slack Socket Mode',
+          `needs Node 22 or newer (this is Node ${process.versions.node})`,
+          'upgrade Node (nvm install 22, or brew upgrade node), then restart ClawBridge',
+        );
+      } else if (appToken) {
         const socket = await checkSlackAppToken(appToken).catch(
           (e: Error) =>
             ({ ok: false, problem: `unreachable (${e.message})`, fix: 'check internet connection' }) as const,

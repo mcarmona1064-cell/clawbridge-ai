@@ -53,7 +53,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "prepare": "node -e \"try{require('child_process').execSync('husky',{stdio:'inherit'})}catch(e){}\"",
+    "prepare": "node scripts/prepare.mjs",
     "prepublishOnly": "pnpm build",
     "setup": "tsx setup/index.ts",
     "setup:wizard": "tsx src/setup/index.ts",
