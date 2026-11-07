@@ -104,7 +104,14 @@ export function composeGroupAgentsMd(group: AgentGroup): void {
     }
   }
 
-  // 5. Per-group user-editable memory.
+  // 5. Team profile from the onboarding conversation (changes only when the owner re-runs setup).
+  const profileFile = path.join(groupDir, 'team-profile.md');
+  if (fs.existsSync(profileFile)) {
+    const profile = fs.readFileSync(profileFile, 'utf8').trim();
+    if (profile) fragments.push({ title: 'Team profile', content: profile });
+  }
+
+  // 6. Per-group user-editable memory.
   const localFile = path.join(groupDir, 'AGENTS.local.md');
   if (!fs.existsSync(localFile)) {
     fs.writeFileSync(localFile, '');

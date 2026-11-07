@@ -413,6 +413,27 @@ async function deliverToAgent(
     threadId: event.threadId,
   };
 
+  // Onboarding answers are handled on the host and never reach the agent.
+  if ((event.message.kind === 'chat' || event.message.kind === 'chat-sdk') && userId) {
+    const onboardingText = safeParseContent(event.message.content).text ?? '';
+    if (onboardingText && !onboardingText.startsWith('/')) {
+      const { handleOnboardingTurn } = await import('./modules/onboarding/index.js');
+      const consumed = await handleOnboardingTurn({
+        agentGroupId: agent.agent_group_id,
+        userId,
+        isDm: mg.is_group === 0,
+        channelType: deliveryAddr.channelType ?? event.channelType,
+        platformId: deliveryAddr.platformId ?? event.platformId,
+        threadId: deliveryAddr.threadId,
+        text: onboardingText,
+      }).catch((err) => {
+        log.warn('Onboarding turn failed', { err });
+        return false;
+      });
+      if (consumed) return;
+    }
+  }
+
   // Command gate: classify slash commands before they reach the container.
   // Filtered commands are dropped silently. Denied admin commands get a
   // permission-denied response written directly to messages_out.
@@ -572,6 +593,22 @@ async function deliverToAgent(
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
     // The person sees at once that their message was picked up.
     if (event.message.kind === 'chat' || event.message.kind === 'chat-sdk') acknowledgeInbound(event);
+    // First DM from an owner or admin: offer the one-minute setup (once).
+    if (mg.is_group === 0 && userId) {
+      void import('./modules/onboarding/index.js')
+        .then(({ maybeOfferOnboarding }) =>
+          maybeOfferOnboarding({
+            agentGroupId: agent.agent_group_id,
+            userId,
+            isDm: true,
+            channelType: deliveryAddr.channelType ?? event.channelType,
+            platformId: deliveryAddr.platformId ?? event.platformId,
+            threadId: deliveryAddr.threadId,
+            text: '',
+          }),
+        )
+        .catch((err) => log.warn('Onboarding offer failed', { err }));
+    }
 
     // Hindsight recall — write `.memory_context.md` into the session dir
     // BEFORE waking the container, so the agent's first read sees this

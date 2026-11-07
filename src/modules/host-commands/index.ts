@@ -72,6 +72,20 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         write(helpText(ctx.event.channelType, !!ctx.userId && hasAdminPrivilege(ctx.userId, ctx.agentGroup.id)));
         return;
       }
+      case '/onboard': {
+        const { startOnboarding } = await import('../onboarding/index.js');
+        const reply = await startOnboarding({
+          agentGroupId: ctx.agentGroup.id,
+          userId: ctx.userId,
+          isDm: ctx.mg.is_group === 0,
+          channelType: ctx.deliveryAddr.channelType ?? ctx.event.channelType,
+          platformId: ctx.deliveryAddr.platformId ?? ctx.event.platformId,
+          threadId: ctx.deliveryAddr.threadId,
+          text: '',
+        });
+        if (reply) write(reply);
+        return;
+      }
       case '/tasks': {
         const { tasksCommand } = await import('./help-tasks.js');
         write(tasksCommand(ctx.agentGroup.id, ctx.userId, ctx.args));
