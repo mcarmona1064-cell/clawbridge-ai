@@ -604,7 +604,7 @@ async function checkWhatsApp(env: Map<string, string>, autoFix: boolean): Promis
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 8000);
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number,verified_name`,
+      `https://graph.facebook.com/v23.0/${phoneNumberId}?fields=display_phone_number,verified_name`,
       {
         signal: controller.signal,
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -617,13 +617,20 @@ async function checkWhatsApp(env: Map<string, string>, autoFix: boolean): Promis
     };
     if (res.ok && data.display_phone_number) {
       pass('WhatsApp', `${data.verified_name ?? ''} (${data.display_phone_number})`);
+      if (!env.get('WHATSAPP_APP_SECRET')) {
+        fail(
+          'WhatsApp security',
+          'webhook signatures are not checked',
+          'add WHATSAPP_APP_SECRET to ~/.clawbridge/.env (Meta app → App settings → Basic → App secret) so forged webhooks are rejected',
+        );
+      }
     } else {
       const errMsg = data.error?.message ?? `HTTP ${res.status}`;
       fail('WhatsApp', `API error: ${errMsg}`, 'check WHATSAPP_ACCESS_TOKEN in ~/.clawbridge/.env');
       if (autoFix) {
         await fixAndVerifyChannel('WhatsApp', async () => {
           try {
-            const r = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number`, {
+            const r = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}?fields=display_phone_number`, {
               headers: { Authorization: `Bearer ${accessToken}` },
             });
             return r.ok;
@@ -639,7 +646,7 @@ async function checkWhatsApp(env: Map<string, string>, autoFix: boolean): Promis
     if (autoFix) {
       await fixAndVerifyChannel('WhatsApp', async () => {
         try {
-          const r = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number`, {
+          const r = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}?fields=display_phone_number`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           return r.ok;
