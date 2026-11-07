@@ -33,6 +33,7 @@ import {
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh } from './modules/typing/index.js';
 import { acknowledgeInbound } from './ack.js';
+import { engageReason, recordEngageDecision } from './engage-log.js';
 import { log } from './log.js';
 import { resolveSession, sessionDir, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -279,6 +280,25 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
 
     const accessOk = engages && (!accessGate || accessGate(event, userId, mg, agent.agent_group_id).allowed);
     const scopeOk = engages && (!senderScopeGate || senderScopeGate(event, userId, mg, agent).allowed);
+    if (!messageText.startsWith('/')) {
+      recordEngageDecision({
+        channelType: event.channelType,
+        platformId: event.platformId,
+        threadId: event.threadId,
+        agentGroupId: agent.agent_group_id,
+        userId,
+        engaged: engages && accessOk && scopeOk,
+        reason: engageReason({
+          engages,
+          accessOk,
+          scopeOk,
+          isMention,
+          isDm: mg.is_group === 0,
+          engageMode: agent.engage_mode,
+          pattern: agent.engage_pattern,
+        }),
+      });
+    }
 
     if (engages && accessOk && scopeOk) {
       await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, true);

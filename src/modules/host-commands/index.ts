@@ -105,6 +105,11 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/why': {
+        const { whyText } = await import('../../engage-log.js');
+        write(whyText(ctx.event.channelType, ctx.event.platformId));
+        return;
+      }
       case '/connect':
         write('Send /connect to the agent in a direct message on your chat app, or run `clawbridge-ai` in a terminal.');
         return;
