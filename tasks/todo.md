@@ -68,18 +68,18 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 ## Milestone 2: easy to use
 
 - [x] 2.1 **Install and setup.** A one-command install (`npx clawbridge-ai`) and a wizard per channel (Slack manifest link, Telegram BotFather, WhatsApp Meta steps, Discord invite link) that ends in a real reply on each.
-- [~] 2.2 **Doctor.** Plain-English failures, each with the exact fix, for every channel.
+- [x] 2.2 **Doctor.** Plain-English failures, each with the exact fix, for every channel.
 - [x] 2.3 **Add a channel from chat.** "Connect our WhatsApp" gets a guided walkthrough on the current channel.
 - [x] 2.4 **Onboarding.** An onboarding conversation that saves its answers as team memory and offers 3 starter tasks as choices.
-- [~] 2.5 **Configure by chat.** Configure from chat: which chats it answers in, schedules, permissions and provider.
+- [x] 2.5 **Configure by chat.** Configure from chat: which chats it answers in, schedules, permissions and provider.
 - [x] 2.6 **Home screens.**
   - Slack App Home
   - Telegram commands menu
   - Discord slash commands
   - a `/status` card everywhere
   - a localhost admin console
-- [~] 2.7 **Commands and errors.** The same commands everywhere (/help, /status, /usage, /memory, /permissions, /tasks, /provider, plus !stop, !mute, !fast and !deep), and friendly errors with an admin alert.
-- [~] 2.8 **Native behaviour.**
+- [x] 2.7 **Commands and errors.** The same commands everywhere (/help, /status, /usage, /memory, /permissions, /tasks, /provider, plus !stop, !mute, !fast and !deep), and friendly errors with an admin alert.
+- [x] 2.8 **Native behaviour.**
   - An instant ack and progress updates.
   - Rework choices.
   - Telegram forum topics.
@@ -364,4 +364,25 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 - A one-time "still working" note on long jobs (all channels except Slack, which has its own status line).
 - A digest scorecard of posted vs. responded, shown in `/digest`.
 - `clawbridge-ai whatsapp-template`, which creates and saves the 24-hour-window template.
+
+### Closing the remaining gaps (2026-11-07)
+
+- **Item 35: the remaining channels.**
+  - Signal, iMessage and email now have native adapters. Each passes the adapter contract suite (`contract-more.test.ts`) and has a checked setup step in `clawbridge-ai`, `/connect` and doctor.
+  - Teams, Google Chat and Webex pass the inbound half of the contract (`bridge-inbound.test.ts`) as well as the outbound half.
+- **Items marked partial are done:**
+  - 2.2 Doctor has plain-English checks with fixes for every channel.
+  - 2.5 Configure by chat: `/reply`, `/digest`, `/permissions`, `/roles`, `/provider`, `/model`, `/voice` and `/connect`. New agents are created by asking the agent (`create_agent`).
+  - 2.7 Every command listed in the brief exists on every channel.
+  - 2.8 Native behaviour: the 👀 acknowledgement, progress notes, rework shortcuts, Telegram topics, WhatsApp voice replies, and group replies only when addressed.
+- **Both providers.**
+  - Everything the host does is provider-independent: channels, approvals, policies, memory scoping, usage, guards.
+  - The provider-specific paths are tested on both providers: usage parsing, model presets, credential handling, and the resume flags.
+  - The eval suite runs every case on Claude and on Codex.
+- **What I cannot verify from here, and what it needs from you:**
+  - Live runs on real accounts: Slack, WhatsApp, Telegram, Discord, Signal, iMessage and email.
+  - A real Docker image (no Docker on this Mac).
+  - The "first channel in under 15 minutes" timing, which only a person going through setup can measure.
+
+  The per-milestone live checks above cover the first two. For the timing, run `clawbridge-ai` from scratch with a stopwatch, choose Telegram, and stop when the bot answers "hi". Then time adding a second channel with `/connect`.
 

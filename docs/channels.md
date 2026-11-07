@@ -4,10 +4,9 @@ ClawBridge AI runs the same agent on every channel. Each channel adapter declare
 
 **First-class channels:** Slack, WhatsApp (Meta Cloud API), Telegram and Discord. Each one passes the same adapter contract suite (`src/channels/contract.test.ts`).
 
-**Other channels:**
-- Teams, Google Chat, Webex and Matrix are installed by skills and run through the Chat SDK bridge. The bridge passes the outbound part of the suite (cards with the shared choice ids, splitting, edits, reactions, files, errors that throw), and each of these channels declares its capabilities: Teams, Google Chat and Webex get buttons.
-- Signal, iMessage and email are plain-text channels, so their cards fall back to numbered replies.
-- Live inbound checks for these channels are still to come.
+**Built-in plain-text channels:** Signal (through signal-cli), iMessage (macOS, through Messages) and email (through Postmark). They have native adapters and pass the same contract suite (`src/channels/contract-more.test.ts`). They have no buttons, so cards become numbered replies. Each is set up from `clawbridge-ai`, `/connect signal|imessage|email` and doctor.
+
+**Chat SDK bridge channels:** Teams, Google Chat and Webex are installed by skills. The bridge passes the inbound and outbound halves of the suite (`src/channels/bridge-inbound.test.ts` and `contract.test.ts`). Teams, Google Chat and Webex keep buttons; Matrix falls back to numbered replies.
 
 ## What each channel supports
 
@@ -55,6 +54,18 @@ Linked accounts share roles (owner, admin), approvals, per-person memory and usa
 Linking commands work before access checks, so a new account can link itself. Codes and confirmations only work in DMs.
 
 ## Channel notes
+
+- **Signal.**
+  - Signal has no bot accounts, so the assistant uses its own number. Register it with `signal-cli -a +1555… register`, keep `signal-cli -a +1555… daemon --tcp 127.0.0.1:7583` running, and set `SIGNAL_ACCOUNT`.
+  - In groups it answers when mentioned or replied to.
+- **iMessage.**
+  - A Mac signed in to Messages; a separate Apple ID is best.
+  - Give the app that runs ClawBridge Full Disk Access, and allow it to control Messages when asked. Set `IMESSAGE_ENABLED=true`.
+  - In group chats it answers when someone says its name.
+- **Email.**
+  - A Postmark server: `POSTMARK_SERVER_TOKEN`, `EMAIL_FROM` (a verified sender) and `EMAIL_INBOUND_TOKEN`.
+  - Point the inbound stream's webhook at `/webhook/email?token=<EMAIL_INBOUND_TOKEN>`.
+  - Each correspondent is one conversation, and replies stay in the email thread.
 
 - **Slack.**
   - Create the app from `setup/channels/slack-app-manifest.json`. It turns on Socket Mode and lists exactly the scopes the adapter uses.
