@@ -22,7 +22,7 @@ import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
-import { hasAdminPrivilege } from '../permissions/db/user-roles.js';
+import { canApprove } from '../permissions/db/user-roles.js';
 import { getApprovalHandler, getApprovalRejectionHandler } from './primitive.js';
 import { ALWAYS_ALLOW_VALUE, setPolicy } from '../../policies.js';
 
@@ -58,7 +58,7 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
   // click (a forwarded card, a bystander in a shared channel) is claimed
   // and ignored.
   const clickerId = clickerIdFor(payload);
-  if (!clickerId || !agentGroupId || !hasAdminPrivilege(clickerId, agentGroupId)) {
+  if (!clickerId || !agentGroupId || !canApprove(clickerId, agentGroupId)) {
     log.warn('Approval click rejected — unauthorized clicker', {
       approvalId: approval.approval_id,
       action: approval.action,

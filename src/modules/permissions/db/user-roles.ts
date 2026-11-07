@@ -101,3 +101,31 @@ export function getAdminsOfAgentGroup(agentGroupId: string): UserRole[] {
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id = ? ORDER BY granted_at')
     .all('admin', agentGroupId) as UserRole[];
 }
+
+function hasScopedRole(userId: string, role: UserRoleKind, agentGroupId: string): boolean {
+  const who = identityClause(userId);
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM user_roles WHERE ${who.sql} AND role = ? AND (agent_group_id = ? OR agent_group_id IS NULL) LIMIT 1`,
+    )
+    .get(...who.params, role, agentGroupId);
+  return !!row;
+}
+
+/** May decide approval cards for this agent: admins and approvers. */
+export function canApprove(userId: string, agentGroupId: string): boolean {
+  return hasAdminPrivilege(userId, agentGroupId) || hasScopedRole(userId, 'approver', agentGroupId);
+}
+
+/** May read usage per person, permissions and the audit trail: admins and auditors. */
+export function canAudit(userId: string, agentGroupId: string): boolean {
+  return hasAdminPrivilege(userId, agentGroupId) || hasScopedRole(userId, 'auditor', agentGroupId);
+}
+
+export function getApproversOfAgentGroup(agentGroupId: string): UserRole[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM user_roles WHERE role = 'approver' AND (agent_group_id = ? OR agent_group_id IS NULL) ORDER BY granted_at",
+    )
+    .all(agentGroupId) as UserRole[];
+}

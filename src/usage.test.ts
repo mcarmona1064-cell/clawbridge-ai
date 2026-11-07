@@ -64,7 +64,8 @@ describe('usage ledger and budgets', () => {
       session,
       inDbWithSender('slack:U1'),
     );
-    const text = usageCommand('ag-1');
+    expect(usageCommand('ag-1', 'slack:U9')).not.toContain('By person');
+    const text = usageCommand('ag-1', 'slack:U1');
     expect(text).toContain('1 replies · 2.0k tokens (plus 50k cached) · about $0.04');
     expect(text).toContain('slack:U1: 2.0k');
     expect(text).toContain('No budget set');

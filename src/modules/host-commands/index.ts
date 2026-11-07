@@ -105,6 +105,18 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/roles': {
+        const { rolesCommand } = await import('./roles-cmd.js');
+        write(
+          rolesCommand({
+            agentGroupId: ctx.agentGroup.id,
+            channelType: ctx.event.channelType,
+            userId: ctx.userId,
+            args: ctx.args,
+          }),
+        );
+        return;
+      }
       case '/permissions': {
         const { permissionsCommand } = await import('./permissions-cmd.js');
         write(permissionsCommand(ctx.agentGroup.id, ctx.userId, ctx.args));
@@ -112,7 +124,7 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
       }
       case '/usage': {
         const { usageCommand } = await import('../usage/index.js');
-        write(usageCommand(ctx.agentGroup.id));
+        write(usageCommand(ctx.agentGroup.id, ctx.userId));
         return;
       }
       case '/budget': {

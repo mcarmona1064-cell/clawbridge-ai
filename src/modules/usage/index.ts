@@ -21,7 +21,7 @@ import {
   setBudget,
   usageText,
 } from '../../usage.js';
-import { hasAdminPrivilege } from '../permissions/db/user-roles.js';
+import { canAudit, hasAdminPrivilege } from '../permissions/db/user-roles.js';
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -71,8 +71,10 @@ export async function handleRecordUsage(
 
 registerDeliveryAction('record_usage', handleRecordUsage);
 
-export function usageCommand(agentGroupId: string): string {
-  return usageText(agentGroupId, getAgentGroup(agentGroupId)?.name ?? 'Your agent');
+export function usageCommand(agentGroupId: string, viewerId: string | null = null): string {
+  // Per-person figures are for admins and auditors; everyone else sees the totals.
+  const showPeople = !!viewerId && canAudit(viewerId, agentGroupId);
+  return usageText(agentGroupId, getAgentGroup(agentGroupId)?.name ?? 'Your agent', new Date(), showPeople);
 }
 
 function describeBudget(b: { monthlyTokens: number | null; monthlyUsd: number | null }): string {

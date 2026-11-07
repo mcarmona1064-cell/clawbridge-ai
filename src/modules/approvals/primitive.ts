@@ -31,7 +31,12 @@ import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { MessagingGroup, Session } from '../../types.js';
-import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
+import {
+  getAdminsOfAgentGroup,
+  getApproversOfAgentGroup,
+  getGlobalAdmins,
+  getOwners,
+} from '../permissions/db/user-roles.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
@@ -102,6 +107,8 @@ export function pickApprover(agentGroupId: string | null): string[] {
   }
   for (const r of getGlobalAdmins()) add(r.user_id);
   for (const r of getOwners()) add(r.user_id);
+  // Approvers come last: admins of the agent are asked first.
+  if (agentGroupId) for (const r of getApproversOfAgentGroup(agentGroupId)) add(r.user_id);
 
   return approvers;
 }

@@ -191,7 +191,7 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-export function usageText(agentGroupId: string, agentName: string, now = new Date()): string {
+export function usageText(agentGroupId: string, agentName: string, now = new Date(), showPeople = true): string {
   const t = agentUsageThisMonth(agentGroupId, now);
   const budget = getBudget(agentGroupId);
   const pct = budgetPercent(agentGroupId, now);
@@ -208,7 +208,7 @@ export function usageText(agentGroupId: string, agentName: string, now = new Dat
   } else {
     lines.push('No budget set. Admins: /budget 5M tokens or /budget $50');
   }
-  const people = usageBreakdown(agentGroupId, 'user_id', now).filter((p) => p.key !== 'unknown');
+  const people = showPeople ? usageBreakdown(agentGroupId, 'user_id', now).filter((p) => p.key !== 'unknown') : [];
   if (people.length)
     lines.push('', '**By person**', ...people.slice(0, 5).map((p) => `• ${p.key}: ${formatTokens(p.billableTokens)}`));
   return lines.join('\n');

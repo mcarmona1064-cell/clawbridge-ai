@@ -46,7 +46,12 @@ export interface User {
   created_at: string;
 }
 
-export type UserRoleKind = 'owner' | 'admin';
+/**
+ * owner: everything, install-wide. admin: manage an agent (or all, when global).
+ * approver: decide approval cards for an agent, nothing else. auditor: read
+ * usage, permissions and the audit trail, change nothing.
+ */
+export type UserRoleKind = 'owner' | 'admin' | 'approver' | 'auditor';
 
 /**
  * Role grant. Owner is always global. Admin is either global
