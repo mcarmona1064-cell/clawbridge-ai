@@ -181,7 +181,15 @@ export const DEFAULT_CAPABILITIES: Record<string, ChannelCapabilities> = {
     maxText: 30_000,
     format: 'markdown',
   },
-  signal: { ...PLAIN_CAPABILITIES, reactions: true, typing: true, filesOut: true, maxText: 2_000 },
+  signal: {
+    ...PLAIN_CAPABILITIES,
+    edit: true,
+    reactions: true,
+    typing: true,
+    filesOut: true,
+    voiceIn: true,
+    maxText: 2_000,
+  },
   imessage: { ...PLAIN_CAPABILITIES, filesOut: true, maxText: 10_000 },
   email: { ...PLAIN_CAPABILITIES, filesOut: true, maxText: 100_000, format: 'markdown' },
 };

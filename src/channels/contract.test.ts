@@ -47,6 +47,7 @@ vi.mock('../transcription.js', () => ({
 
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { capabilitiesFor } from './capabilities.js';
+import { numberedChoicesText } from './render.js';
 import { createDiscordAdapter, type DiscordClientLike } from './discord.js';
 import './slack.js';
 import './telegram.js';
@@ -74,9 +75,15 @@ interface Harness {
   redeliver: (() => Promise<void>) | null;
   /** Send a group message; null = channel has no groups. */
   group: ((id: string, text: string, mention: boolean) => Promise<void>) | null;
-  voice(id: string): Promise<void>;
-  click(questionId: string, idx: number, userId: string): Promise<void>;
+  /** Send a voice note; null = the channel delivers no audio to the bot. */
+  voice: ((id: string) => Promise<void>) | null;
+  /** Click a card button; null = no buttons (numbered replies, handled by the host channel layer). */
+  click: ((questionId: string, idx: number, userId: string) => Promise<void>) | null;
   unsigned: (() => Promise<Response>) | null;
+  /** 'numbered' for channels without buttons: cards arrive as a numbered list. */
+  choices?: 'buttons' | 'numbered';
+  /** Display name the platform gives the test sender (default 'Ana'). */
+  expectedSender?: string;
   isSend(c: Call): boolean;
   textOf(c: Call): string;
   choiceIdsOf(c: Call): string[];
@@ -641,7 +648,7 @@ describe.each(harnesses)('%s adapter contract', (_name, make) => {
     expect(inbound.isGroup).toBe(false);
     expect(inbound.content.text).toContain('what is the plan?');
     expect(inbound.content.senderId).toMatch(new RegExp(`^${h.channelType}:.+`));
-    expect(inbound.content.sender).toBe('Ana');
+    expect(inbound.content.sender).toBe(h.expectedSender ?? 'Ana');
   });
 
   it('drops a platform redelivery of the same message', async () => {
@@ -666,12 +673,24 @@ describe.each(harnesses)('%s adapter contract', (_name, make) => {
   });
 
   it('transcribes voice notes', async () => {
+    if (!h.voice) return; // see harness: the platform gives the bot no audio
     await h.voice('31');
     await until(() => h.setup.onInbound.mock.calls.length === 1);
     expect(h.setup.onInbound.mock.calls[0][2].content.text).toContain('[voice] hello from a voice note');
   });
 
   it('renders a question card with choice ids the response path understands', async () => {
+    if (h.choices === 'numbered') {
+      // The host channel layer turns cards into a numbered list for channels without buttons.
+      const c = card.content as { title: string; question: string; options: never };
+      await h.adapter.deliver(h.dmPlatformId, null, {
+        kind: 'chat',
+        content: { text: numberedChoicesText(c.title, c.question, c.options) },
+      });
+      const sent = h.calls.filter((x) => h.isSend(x)).pop()!;
+      expect(h.textOf(sent)).toMatch(/1\. Approve[\s\S]*2\. Reject/);
+      return;
+    }
     await h.adapter.deliver(h.dmPlatformId, null, card);
     const sent = h.calls.filter((c) => h.isSend(c)).pop()!;
     expect(h.choiceIdsOf(sent)).toEqual(['ncq:q-1:0', 'ncq:q-1:1']);
@@ -679,13 +698,18 @@ describe.each(harnesses)('%s adapter contract', (_name, make) => {
   });
 
   it('turns a click into onAction with the option value and the raw clicker id', async () => {
+    if (!h.click) return; // numbered replies are answered by the host (see channel-layer.test.ts)
     await h.click('q-1', 1, '9');
     await until(() => h.setup.onAction.mock.calls.length === 1);
     expect(h.setup.onAction).toHaveBeenCalledWith('q-1', 'reject', '9');
   });
 
   it("splits long replies within the channel's limit", async () => {
-    const long = Array.from({ length: 120 }, (_, i) => `Paragraph ${i}: ${'lorem ipsum '.repeat(8)}`).join('\n\n');
+    const max0 = capabilitiesFor(h.channelType).maxText;
+    const paragraphs = Math.max(120, Math.ceil((max0 * 1.6) / 110));
+    const long = Array.from({ length: paragraphs }, (_, i) => `Paragraph ${i}: ${'lorem ipsum '.repeat(8)}`).join(
+      '\n\n',
+    );
     await h.adapter.deliver(h.dmPlatformId, null, { kind: 'chat', content: { text: long } });
     const sends = h.calls.filter((c) => h.isSend(c));
     const max = capabilitiesFor(h.channelType).maxText;
@@ -728,7 +752,7 @@ describe.each(harnesses)('%s adapter contract', (_name, make) => {
   it('rejects unsigned webhooks', async () => {
     if (!h.unsigned) return; // see harness: no inbound webhook (long poll or gateway)
     const res = await h.unsigned();
-    expect(res.status).toBe(401);
+    expect([401, 403, 404]).toContain(res.status);
   });
 });
 

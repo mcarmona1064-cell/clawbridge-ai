@@ -11,3 +11,6 @@ import './telegram.js';
 import './discord.js';
 import './slack.js';
 import './whatsapp.js';
+import './signal.js';
+import './imessage.js';
+import './email.js';
