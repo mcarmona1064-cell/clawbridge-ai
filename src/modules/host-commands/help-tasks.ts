@@ -21,6 +21,7 @@ export function helpText(channelType: string, isAdmin: boolean): string {
     '• !stop: stop what I am doing',
     '• !mute [hours] / !unmute: keep me quiet in this chat',
     '• !fast / !deep / !normal: quicker and cheaper, or more careful',
+    '• !shorter / !longer / !simpler / !redo / !undo: rework my last reply',
     '• /status: what I am doing and which AI I use',
     '• /tasks: my scheduled jobs',
     '• /link: connect this account with your account on another app',

@@ -21,7 +21,7 @@ import { routeInbound } from './router.js';
 import { interceptNumberedReply, prepareOutbound } from './channels/channel-layer.js';
 import { handleIdentityCommand, isIdentityCommand } from './modules/identity/index.js';
 import { stopChatSession } from './stop-session.js';
-import { handleChatControl, isChatControl, mutedUntil } from './chat-controls.js';
+import { handleChatControl, isChatControl, mutedUntil, reworkPrompt } from './chat-controls.js';
 import { handleConnect, isConnectMessage } from './modules/connect/index.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
@@ -226,6 +226,11 @@ async function main(): Promise<void> {
             )
             .catch((err) => log.error('Chat control failed', { err }));
           return;
+        }
+        // Rework shortcuts become a clear instruction about the last reply.
+        if (typeof inboundContent.text === 'string') {
+          const rework = reworkPrompt(inboundContent.text);
+          if (rework) (message.content as Record<string, unknown>).text = rework;
         }
         if (mutedUntil(adapter.channelType, platformId)) {
           log.debug('Message dropped — chat is muted', { channelType: adapter.channelType, platformId });

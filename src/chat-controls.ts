@@ -146,3 +146,23 @@ async function applyPresetToChat(input: ControlInput, preset: 'fast' | 'balanced
   });
   return `${PRESET_TEXT[preset]}. I'll use it from your next message.`;
 }
+
+const REWORK: Record<string, string> = {
+  shorter: 'Rewrite your last reply much shorter: keep only what matters, at most a few lines.',
+  longer: 'Expand your last reply with more detail and concrete examples.',
+  simpler: 'Rewrite your last reply in plain, simple words for someone new to the topic.',
+  redo: 'Try your last reply again with a different approach; say briefly what you changed.',
+  undo: 'Undo the last change you made, if it can be undone (use the same tools in reverse, with approval where needed). Say exactly what you reverted, or why it cannot be undone.',
+};
+
+/**
+ * Rework shortcuts: "!shorter", "!longer", "!simpler", "!redo", "!undo",
+ * optionally followed by what to focus on ("!shorter keep the numbers").
+ * Returns the instruction to send to the agent, or null.
+ */
+export function reworkPrompt(text: string): string | null {
+  const m = /^!(shorter|longer|simpler|redo|undo)\b\s*(.*)$/i.exec(text.trim());
+  if (!m) return null;
+  const extra = m[2].trim();
+  return `${REWORK[m[1].toLowerCase()]}${extra ? ` Also: ${extra}` : ''}`;
+}

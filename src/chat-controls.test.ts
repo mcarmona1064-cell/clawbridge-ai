@@ -9,7 +9,7 @@ vi.mock('./stop-session.js', () => ({
   },
 }));
 
-import { handleChatControl, isChatControl, mutedUntil } from './chat-controls.js';
+import { handleChatControl, isChatControl, mutedUntil, reworkPrompt } from './chat-controls.js';
 import { closeDb, initTestDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { grantRole } from './modules/permissions/db/user-roles.js';
@@ -73,5 +73,12 @@ describe('chat controls', () => {
       granted_at: new Date().toISOString(),
     });
     expect(await handleChatControl({ ...base, isGroup: true, text: '!mute 1' })).toMatch(/quiet/);
+  });
+
+  it('turns rework shortcuts into instructions about the last reply', () => {
+    expect(reworkPrompt('!shorter')).toMatch(/much shorter/);
+    expect(reworkPrompt('!simpler keep the numbers')).toMatch(/plain, simple words.*Also: keep the numbers/);
+    expect(reworkPrompt('!undo')).toMatch(/Undo the last change/);
+    expect(reworkPrompt('make it shorter')).toBeNull();
   });
 });
