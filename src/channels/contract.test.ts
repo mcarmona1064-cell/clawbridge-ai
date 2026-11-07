@@ -448,7 +448,10 @@ async function whatsappHarness(): Promise<Harness> {
 // ── Discord ──
 
 async function discordHarness(): Promise<
-  Harness & { inThread(id: string, text: string, threadId: string): Promise<void> }
+  Harness & {
+    inThread(id: string, text: string, threadId: string): Promise<void>;
+    slash(name: string, arg?: string): Promise<void>;
+  }
 > {
   const calls: Call[] = [];
   let failNext = false;
@@ -576,6 +579,20 @@ async function discordHarness(): Promise<
     rateLimitNextSend: null, // discord.js queues and retries rate limits inside its REST client.
     teardown: () => adapter.teardown(),
     inThread: (id, text, threadId) => inbound(id, text, { guild: true, channel: channels.get(threadId)! }),
+    slash: async (name, arg) => {
+      await events.get('interactionCreate')!({
+        id: `int-${name}`,
+        isChatInputCommand: () => true,
+        isButton: () => false,
+        commandName: name,
+        options: { getString: () => arg ?? null },
+        reply: async () => undefined,
+        channel: channels.get('C1'),
+        channelId: 'C1',
+        guildId: 'G1',
+        user: { id: 'U1', username: 'ana', globalName: 'Ana' },
+      });
+    },
   };
 }
 
@@ -729,6 +746,22 @@ describe('discord threads', () => {
     await h.inThread('501', 'and the budget?', '500');
     await until(() => h.setup.onInbound.mock.calls.length === 2);
     expect(h.setup.onInbound.mock.calls[1].slice(0, 2)).toEqual(['discord:C1', '500']);
+    await h.teardown();
+  });
+});
+
+describe('discord slash commands', () => {
+  it('forwards a slash command as the matching text command from that user', async () => {
+    const h = await discordHarness();
+    await h.slash('status');
+    await until(() => h.setup.onInbound.mock.calls.length === 1);
+    const [platformId, threadId, inbound] = h.setup.onInbound.mock.calls[0];
+    expect(platformId).toBe('discord:C1');
+    expect(threadId).toBeNull();
+    expect(inbound.content).toMatchObject({ text: '/status', senderId: 'discord:U1', sender: 'Ana' });
+    await h.slash('mute', '2');
+    await until(() => h.setup.onInbound.mock.calls.length === 2);
+    expect(h.setup.onInbound.mock.calls[1][2].content.text).toBe('!mute 2');
     await h.teardown();
   });
 });

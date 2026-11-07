@@ -19,6 +19,10 @@ import { notifyAgent } from '../approvals/index.js';
 import { saveTeamFact, validateTeamFact } from '../team-memory/index.js';
 import { dispatchResponse } from '../../response-registry.js';
 import type { InboundEvent } from '../../channels/adapter.js';
+import { buildHomeSummary, homeSummaryMarkdown, setTaskCounter } from '../../home-summary.js';
+import { listTasks } from './help-tasks.js';
+
+setTaskCounter((agentGroupId) => listTasks(agentGroupId).length);
 import type { Session, MessagingGroup, AgentGroup } from '../../types.js';
 import { audit } from '../../audit.js';
 
@@ -184,27 +188,18 @@ function handleStop(ctx: HostCommandContext, write: WriteResponse): void {
 function handleStatus(ctx: HostCommandContext, write: WriteResponse): void {
   const s = ctx.session;
   const running = isContainerRunning(s.id);
+  const provider = resolveProviderName(
+    s.agent_provider,
+    ctx.agentGroup.agent_provider,
+    readContainerConfig(ctx.agentGroup.folder).provider,
+  );
   const lastActive = s.last_active ? new Date(s.last_active).toLocaleString() : 'never';
   write(
-    'Session status\n' +
-      'Agent: ' +
-      s.agent_group_id +
-      '\n' +
-      'Session: ' +
-      s.id +
-      '\n' +
-      'Container: ' +
-      (running ? 'running' : s.container_status) +
-      '\n' +
-      'Provider: ' +
-      resolveProviderName(
-        s.agent_provider,
-        ctx.agentGroup.agent_provider,
-        readContainerConfig(ctx.agentGroup.folder).provider,
-      ) +
-      '\n' +
-      'Last active: ' +
-      lastActive,
+    [
+      `**This conversation:** ${running ? 'working now' : 'ready'} · ${provider} · last active ${lastActive}`,
+      '',
+      homeSummaryMarkdown(buildHomeSummary(ctx.userId)),
+    ].join('\n'),
   );
 }
 

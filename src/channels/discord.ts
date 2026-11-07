@@ -83,7 +83,43 @@ export function discordButtonRows(questionId: string, options: NormalizedOption[
 /** Minimal surface of the discord.js client the adapter uses (lets tests pass a fake). */
 export type DiscordClientLike = Pick<Client, 'on' | 'login' | 'destroy' | 'channels' | 'users'> & {
   user: { id: string; tag?: string } | null;
+  application?: { commands: { set(commands: unknown[]): Promise<unknown> } } | null;
 };
+
+/**
+ * Slash commands shown in Discord's command menu. Each one is forwarded to
+ * the host as the matching text command, so it behaves exactly like typing it.
+ */
+export const DISCORD_SLASH_COMMANDS: Array<{ name: string; description: string; text: string; arg?: string }> = [
+  { name: 'help', description: 'How to work with me', text: '/help' },
+  { name: 'status', description: 'What I am doing and which AI I use', text: '/status' },
+  { name: 'tasks', description: 'My scheduled jobs', text: '/tasks' },
+  { name: 'stop', description: 'Stop what I am doing', text: '!stop' },
+  { name: 'mute', description: 'Keep me quiet in this channel', text: '!mute', arg: 'hours' },
+  { name: 'unmute', description: 'Let me talk again', text: '!unmute' },
+  { name: 'link', description: 'Link this account to your account on another app', text: '/link', arg: 'code' },
+  { name: 'accounts', description: 'Accounts linked to you', text: '/accounts' },
+  { name: 'notify-here', description: 'Send your approvals and alerts here', text: '/notify-here' },
+];
+
+export function discordCommandDefinitions(): unknown[] {
+  return DISCORD_SLASH_COMMANDS.map((c) => ({
+    name: c.name,
+    description: c.description,
+    ...(c.arg
+      ? {
+          options: [
+            {
+              type: 3,
+              name: c.arg,
+              description: c.arg === 'hours' ? 'How many hours' : 'The 6-digit code',
+              required: false,
+            },
+          ],
+        }
+      : {}),
+  }));
+}
 
 function strip(platformOrThread: string): string {
   return platformOrThread.startsWith(`${CHANNEL_TYPE}:`)
@@ -192,7 +228,31 @@ export function createDiscordAdapter(token: string, client: DiscordClientLike): 
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      if (!cfg || !interaction.isButton()) return;
+      if (!cfg) return;
+      if (typeof interaction.isChatInputCommand === 'function' && interaction.isChatInputCommand()) {
+        const def = DISCORD_SLASH_COMMANDS.find((c) => c.name === interaction.commandName);
+        if (!def) return;
+        const arg = def.arg ? (interaction.options.getString(def.arg) ?? '') : '';
+        // Discord needs an answer within 3 seconds; the real reply follows in the channel.
+        await interaction.reply({ content: 'On it…', ephemeral: true }).catch(() => undefined);
+        const inThread = typeof interaction.channel?.isThread === 'function' && interaction.channel.isThread();
+        const parentId = inThread ? (interaction.channel as unknown as { parentId: string | null }).parentId : null;
+        const platformId = namespacedPlatformId(CHANNEL_TYPE, parentId ?? interaction.channelId);
+        await cfg.onInbound(platformId, inThread ? interaction.channelId : null, {
+          id: interaction.id,
+          kind: 'chat',
+          content: {
+            text: `${def.text}${arg ? ` ${arg}` : ''}`,
+            sender: interaction.user.globalName || interaction.user.username,
+            senderId: `${CHANNEL_TYPE}:${interaction.user.id}`,
+          },
+          timestamp: new Date().toISOString(),
+          isMention: true,
+          isGroup: !!interaction.guildId,
+        });
+        return;
+      }
+      if (!interaction.isButton()) return;
       const parsed = parseChoiceId(interaction.customId);
       if (!parsed) return;
       const value = resolveChoiceValue(parsed.questionId, parsed.idx);
@@ -254,6 +314,10 @@ export function createDiscordAdapter(token: string, client: DiscordClientLike): 
       cfg = config;
       await client.login(token);
       connected = true;
+      // Show our commands in Discord's "/" menu (global commands can take a while to appear).
+      await client.application?.commands
+        .set(discordCommandDefinitions())
+        .catch((err: Error) => log.warn('[discord] could not register slash commands', { err: err.message }));
       log.info('[discord] Bot connected', { tag: client.user?.tag });
     },
 

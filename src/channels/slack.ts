@@ -322,6 +322,16 @@ function createAdapter(): ChannelAdapter | null {
   /** Process one Events API event (after the HTTP ack). */
   async function handleEvent(event: Record<string, unknown>): Promise<void> {
     const type = event['type'] as string;
+    if (type === 'app_home_opened' && event['tab'] === 'home') {
+      const user = event['user'] as string;
+      try {
+        const { buildHomeSummary, slackHomeView } = await import('../home-summary.js');
+        await api('views.publish', { user_id: user, view: slackHomeView(buildHomeSummary(`${CHANNEL_TYPE}:${user}`)) });
+      } catch (err) {
+        log.warn('[slack] could not publish the Home tab', { err: (err as Error).message });
+      }
+      return;
+    }
     if (type === 'agent_session_stopped') {
       const channelId = event['channel'] as string;
       const threadTs = (event['thread_ts'] as string | undefined) ?? null;
