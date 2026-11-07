@@ -18,6 +18,7 @@ import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { initErrorHandler } from './error-handler.js';
 import { startHealthCheck, stopHealthCheck } from './health-check.js';
 import { routeInbound } from './router.js';
+import { interceptNumberedReply, prepareOutbound } from './channels/channel-layer.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
 
@@ -114,6 +115,24 @@ async function main(): Promise<void> {
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
     return {
       onInbound(platformId, threadId, message) {
+        // A reply of "2" to a numbered question card answers the card (same
+        // path as a button click) instead of reaching the agent.
+        const inboundContent = (message.content ?? {}) as { text?: unknown; senderId?: unknown };
+        const answer =
+          typeof inboundContent.text === 'string'
+            ? interceptNumberedReply(adapter.channelType, platformId, threadId, inboundContent.text)
+            : null;
+        if (answer) {
+          dispatchResponse({
+            questionId: answer.questionId,
+            value: answer.value,
+            userId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            channelType: adapter.channelType,
+            platformId,
+            threadId,
+          }).catch((err) => log.error('Failed to handle numbered reply', { questionId: answer.questionId, err }));
+          return;
+        }
         routeInbound({
           channelType: adapter.channelType,
           platformId,
@@ -203,7 +222,9 @@ async function main(): Promise<void> {
         log.warn('No adapter for channel type', { channelType });
         return;
       }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
+      const prepared = prepareOutbound(adapter, platformId, threadId, { kind, content: JSON.parse(content), files });
+      if (!prepared) return;
+      return adapter.deliver(platformId, threadId, prepared);
     },
     async setTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
       const adapter = getChannelAdapter(channelType);

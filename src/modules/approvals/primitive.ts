@@ -21,7 +21,7 @@
  * exposing just user-roles/user-dms) is more churn than it's worth. Revisit
  * if either module becomes genuinely optional (see REFACTOR_PLAN open q #3).
  */
-import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
+import { cardTtlMs, normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { createPendingApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
@@ -167,13 +167,8 @@ export interface RequestApprovalOptions {
   question: string;
 }
 
-const DEFAULT_APPROVAL_TTL_HOURS = 24;
-
 /** How long an approval card stays actionable. APPROVAL_TTL_HOURS overrides. */
-export function approvalTtlMs(): number {
-  const hours = Number(process.env.APPROVAL_TTL_HOURS);
-  return (Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_APPROVAL_TTL_HOURS) * 60 * 60 * 1000;
-}
+export const approvalTtlMs = cardTtlMs;
 
 /**
  * Queue an approval request. Picks an approver, delivers the card to their

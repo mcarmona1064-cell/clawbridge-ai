@@ -5,6 +5,8 @@
  * Two patterns: native adapters (implement directly) or Chat SDK bridge (wrap a Chat SDK adapter).
  */
 
+import type { ChannelCapabilities } from './capabilities.js';
+
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
   /** Called when an inbound message arrives from the platform. */
@@ -122,6 +124,13 @@ export interface ConversationInfo {
 export interface ChannelAdapter {
   name: string;
   channelType: string;
+
+  /**
+   * What this channel can do (choices, edits, limits, formatting). Features
+   * read this through `capabilitiesFor()` instead of branching on the
+   * channel name. Omit to use the defaults in capabilities.ts.
+   */
+  capabilities?: Partial<ChannelCapabilities>;
 
   /**
    * Whether this adapter models conversations as threads.

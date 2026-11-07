@@ -158,6 +158,8 @@ export interface PendingQuestion {
   title: string;
   options: import('./channels/ask-question.js').NormalizedOption[];
   created_at: string;
+  /** When the card stops accepting answers. Null on rows from before expiry existed. */
+  expires_at?: string | null;
 }
 
 // ── Pending approvals (central DB) ──

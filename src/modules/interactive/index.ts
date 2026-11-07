@@ -23,6 +23,13 @@ async function handleInteractiveResponse(payload: ResponsePayload): Promise<bool
   const pq = getPendingQuestion(payload.questionId);
   if (!pq) return false;
 
+  // An expired card no longer accepts answers; the agent has moved on.
+  if (pq.expires_at && Date.parse(pq.expires_at) <= Date.now()) {
+    log.info('Question response ignored — card expired', { questionId: payload.questionId });
+    deletePendingQuestion(payload.questionId);
+    return true;
+  }
+
   const session = getSession(pq.session_id);
   if (!session) {
     log.warn('Session not found for pending question', { questionId: payload.questionId, sessionId: pq.session_id });

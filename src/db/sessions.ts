@@ -106,8 +106,8 @@ export function deleteSession(id: string): void {
 export function createPendingQuestion(pq: PendingQuestion): boolean {
   const result = getDb()
     .prepare(
-      `INSERT OR IGNORE INTO pending_questions (question_id, session_id, message_out_id, platform_id, channel_type, thread_id, title, options_json, created_at)
-       VALUES (@question_id, @session_id, @message_out_id, @platform_id, @channel_type, @thread_id, @title, @options_json, @created_at)`,
+      `INSERT OR IGNORE INTO pending_questions (question_id, session_id, message_out_id, platform_id, channel_type, thread_id, title, options_json, created_at, expires_at)
+       VALUES (@question_id, @session_id, @message_out_id, @platform_id, @channel_type, @thread_id, @title, @options_json, @created_at, @expires_at)`,
     )
     .run({
       question_id: pq.question_id,
@@ -119,6 +119,7 @@ export function createPendingQuestion(pq: PendingQuestion): boolean {
       title: pq.title,
       options_json: JSON.stringify(pq.options),
       created_at: pq.created_at,
+      expires_at: pq.expires_at ?? null,
     });
   return result.changes > 0;
 }

@@ -25,13 +25,13 @@
  */
 import crypto from 'crypto';
 
-import { getAskQuestionRender } from '../db/sessions.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import { namespacedPlatformId } from '../platform-id.js';
 import { registerRawWebhookHandler } from '../webhook-server.js';
 import type { ChannelAdapter, ChannelSetup, InboundFile, InboundMessage, OutboundMessage } from './adapter.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
+import { resolveChoiceValue, SeenSet } from './render.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { isAudioLike, transcribeAudio } from '../transcription.js';
 
@@ -64,7 +64,6 @@ export const SLACK_MAX_MARKDOWN = 11_000;
 const SLACK_MAX_FALLBACK = 3_000;
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RETRY_AFTER_S = 30;
-const SEEN_EVENT_CAP = 2_000;
 const USER_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 interface SlackFile {
@@ -180,30 +179,9 @@ export function questionMessage(
 }
 
 /** Resolve a clicked button back to the option's real value. */
-export function resolveSlackOption(questionId: string, idxOrValue: string): string {
-  const render = getAskQuestionRender(questionId);
-  if (render && /^\d+$/.test(idxOrValue)) {
-    const opt = render.options[Number(idxOrValue)];
-    if (opt) return opt.value;
-  }
-  return idxOrValue;
-}
+export const resolveSlackOption = resolveChoiceValue;
 
-/** Bounded set of recently seen keys, for event de-duplication. */
-export class SeenSet {
-  private readonly keys = new Set<string>();
-  constructor(private readonly cap = SEEN_EVENT_CAP) {}
-  /** Returns true if the key was already seen; records it otherwise. */
-  checkAndAdd(key: string): boolean {
-    if (this.keys.has(key)) return true;
-    this.keys.add(key);
-    if (this.keys.size > this.cap) {
-      const oldest = this.keys.values().next().value;
-      if (oldest !== undefined) this.keys.delete(oldest);
-    }
-    return false;
-  }
-}
+export { SeenSet };
 
 function createAdapter(): ChannelAdapter | null {
   const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET']);

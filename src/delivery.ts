@@ -22,7 +22,7 @@ import {
   migrateDeliveredTable,
 } from './db/session-db.js';
 import { log } from './log.js';
-import { normalizeOptions } from './channels/ask-question.js';
+import { cardTtlMs, normalizeOptions } from './channels/ask-question.js';
 import { memoryScopeForSession, originForSession, provenanceTags, retainTurn } from './memory/index.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
@@ -401,6 +401,7 @@ async function deliverMessage(
         title,
         options: normalizeOptions(rawOptions as never),
         created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + cardTtlMs()).toISOString(),
       });
       if (inserted) {
         log.info('Pending question created', { questionId: content.questionId, sessionId: session.id });

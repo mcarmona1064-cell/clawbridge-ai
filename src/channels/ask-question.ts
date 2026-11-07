@@ -44,3 +44,14 @@ export interface AskQuestionPayload {
   question: string;
   options: NormalizedOption[];
 }
+
+const DEFAULT_CARD_TTL_HOURS = 24;
+
+/**
+ * How long a question or approval card accepts answers. APPROVAL_TTL_HOURS
+ * overrides (one setting for both, so cards behave the same everywhere).
+ */
+export function cardTtlMs(): number {
+  const hours = Number(process.env.APPROVAL_TTL_HOURS);
+  return (Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_CARD_TTL_HOURS) * 60 * 60 * 1000;
+}

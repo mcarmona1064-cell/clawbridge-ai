@@ -1,135 +1,118 @@
-# Central slash commands + host terminal approval implementation plan
+# ClawBridge AI: every channel, easy to use
 
-> **For Hermes:** Implement with strict TDD, minimal scope, and verify before commit/push.
+Goal: a non-technical owner gets a working agent on their first channel in under 15 minutes, adds each further channel in under 5, and never needs a terminal after setup. Slack, WhatsApp, Telegram and Discord are first-class. Teams, Google Chat, Signal, iMessage, Matrix and email follow.
 
-**Goal:** Make ClawBridge use a single source of truth for slash command behavior and add messaging-channel approval for sensitive host terminal execution (`host_exec`).
+The earlier host-exec and command-registry plan is in `tasks/todo-archive-host-exec.md`.
 
-**Architecture:** Add a shared TypeScript command registry consumed by both host and container runner. Add a host-exec approval flow that sends an approval card to an owner/admin over the existing messaging channel before running dangerous host commands, then writes the command result back to the waiting container response file.
+## Where the channels stand (audit, 2026-11-06)
 
-**Tech Stack:** TypeScript, pnpm, Vitest, SQLite-backed sessions/approvals, existing delivery adapter and approval primitive.
+| | Slack | Telegram | WhatsApp (Cloud API) | Discord |
+|---|---|---|---|---|
+| Sender id and name | yes | yes | **no** (no senderId or name) | **no** senderId |
+| Webhook signature | yes | n/a (long poll) | **no** (X-Hub-Signature-256 unchecked) | n/a (gateway) |
+| Dedupe of retries | yes | update_id offset | **no** | n/a |
+| Send errors throw | yes | yes | **no** (`messages[0].id` or undefined) | partly |
+| Long-text split | yes | **no** (4096 limit) | **no** (4096 limit) | yes |
+| Formatting | markdown blocks | **plain text** | plain text | markdown |
+| Choices/approvals | buttons | **none** | **none** | **none** |
+| Edit / reaction | yes | no | no | no |
+| Files out | yes | yes | **no** | **no** |
+| Threads | replies in thread | n/a | n/a | **threadId ignored on send** |
 
----
+So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slack today.
 
-## Task 1 — Central slash command registry
+## Milestone 0: one channel layer
 
-**Objective:** Create one shared host/container command registry modeled after Hermes `COMMAND_REGISTRY` so command lists no longer drift.
+- [ ] 0.1 **Capability model.** Add `src/channels/capabilities.ts` with `ChannelCapabilities`: threads, choices (buttons max, list max, label max), edit, reactions, typing, filesOut, voiceIn, maxText, format dialect, commands, home, openDM and replyWindowHours. `ChannelAdapter.capabilities?` holds the values, with `capabilitiesFor(channelType)` as the fallback. Features read capabilities, not channel names.
+- [ ] 0.2 **One renderer.** Add `src/channels/render.ts`: `toTelegramHtml`, `toWhatsApp`, `toDiscord`, `toPlain` and Slack passthrough, plus a shared `splitText(text, limit)` that never splits inside a code fence. Add a `planChoices(caps, options)` helper that returns buttons, list or numbered.
+- [ ] 0.3 **Choices on every channel.**
+  - Telegram: inline keyboard plus `callback_query`, then `answerCallbackQuery` and an edit that removes the buttons.
+  - WhatsApp: reply buttons (max 3, 20-character titles) or list (max 10), with inbound `interactive.button_reply` and `list_reply`.
+  - Discord: button components plus InteractionCreate, then disable the buttons.
+  - Plain channels: a numbered-reply fallback through a `numbered_prompts` table that the router intercepts.
+  - All of them reuse `ncq:{questionId}:{idx}` and go through `onAction`, so the existing auth, expiry and records apply.
+- [ ] 0.4 **Question expiry.** `pending_questions` get the same TTL as approvals, and stale clicks are refused politely.
+- [ ] 0.5 **Cross-channel identity.**
+  - `user_links` (alias user id → primary user id) and `link_codes`.
+  - `/link` in a DM issues a 6-digit code (10 minutes, single use).
+  - `/link <code>` from the other account in a DM sends a confirm card to the first account. Linking only happens after that approval.
+  - Roles, admin checks, approver picking and `/usage` resolve through the primary id.
+  - `/unlink`.
+- [ ] 0.6 **Admin's channel.** `/notify-here` sets the approvals and alerts channel per user, and `pickApprovalDelivery` prefers it across linked accounts.
+- [ ] 0.7 **Adapter contract suite.** `src/channels/contract/` holds one spec run against a fake platform for Slack, Telegram, WhatsApp and Discord. It covers:
+  - sender identity, dedupe and retries, DM vs group, mention handling
+  - choices and clicks
+  - edit or its fallback, files in and out, voice transcription
+  - long-message splitting, errors that throw, rate-limit backoff
+- [ ] 0.8 **Bring Telegram, WhatsApp and Discord to Slack's quality.**
+  - WhatsApp: signature check (`WHATSAPP_APP_SECRET`), senderId and name from `contacts`, dedupe, thrown errors, splitting, files out, read receipts as the ack.
+  - Telegram: HTML formatting, splitting, edits, reactions, files out by type.
+  - Discord: senderId and name, reply in the thread or reply-to, files out, edits, reactions.
+- [ ] 0.9 **Docs.** Add `docs/channels.md` with a capability matrix and the graceful fallbacks.
 
-**Files:**
-- Create: `src/shared/commands.ts`
-- Modify: `src/command-gate.ts`
-- Modify: `container/agent-runner/src/formatter.ts`
-- Test: `src/command-gate.test.ts`
-- Test: existing/new runner formatter/poll-loop tests
+## Milestone 1: safety floor
 
-**Plan:**
-1. Write failing tests for command classification, especially `/clearfoo` not matching `/clear`.
-2. Create `shared/commands.ts` exporting:
-   - `CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none'`
-   - command definitions for `/help`, `/login`, `/logout`, `/doctor`, `/config`, `/remote-control`, `/start`, `/clear`, `/compact`, `/context`, `/cost`, `/files`
-   - `extractSlashCommand(text)` tokenizes only the first whitespace-delimited token.
-   - `classifySlashCommand(text)` returns category and command.
-   - `isCommand(text, command)` exact-token helper for runner-local `/clear`.
-3. Update host `gateCommand()` to call registry classification.
-4. Update container formatter `categorizeMessage()` and `isClearCommand()` to call registry helpers.
-5. Run focused tests, then full tests.
+- [ ] 1.1 **No public URL where the platform allows it:**
+  - Slack Socket Mode, the default when `SLACK_APP_TOKEN` is set
+  - Telegram long polling, already done
+  - the Discord gateway, already done
+  - for WhatsApp, a guided `cloudflared` tunnel helper plus the signature check
+- [ ] 1.2 **Egress proxy.** A host egress proxy with placeholder secrets. Containers get `CLAWBRIDGE_PLACEHOLDER_*` and the proxy swaps in real headers for allowlisted hosts only. The Codex `auth.json` is mounted read-only. Containers reach only the proxy.
+- [ ] 1.3 **Slack agent_view.** `assistant.threads.setStatus` and `agents.sessions.setStatus` statuses, with `agent_session_stopped` mapped to stop.
+- [ ] 1.4 **Audit table.** An append-only `audit_log` (triggers block UPDATE and DELETE) covering approvals, host_exec, provider switches, role changes, identity links, memory writes and outbound posts. `clawbridge-ai audit export --format jsonl|csv`.
+- [ ] 1.5 **WhatsApp policy.**
+  - A 24-hour window tracker. Outside the window, a send must use a template; otherwise it fails with a clear message.
+  - `WHATSAPP_TEMPLATES` config, plus a setup helper.
+  - STOP/START opt-out handling.
 
-**Acceptance criteria:**
-- `/clear` and `/clear anything` clear the runner session.
-- `/clearfoo` is an unknown passthrough command and does not clear.
-- Host and container command categories come from the same file.
-- Existing filtered/admin behavior remains compatible, with `/start` filtered consistently.
+## Milestone 2: easy to use
 
----
+- [ ] 2.1 **Install and setup.** A one-command install (`npx clawbridge-ai`) and a wizard per channel (Slack manifest link, Telegram BotFather, WhatsApp Meta steps, Discord invite link) that ends in a real reply on each.
+- [ ] 2.2 **Doctor.** Plain-English failures, each with the exact fix, for every channel.
+- [ ] 2.3 **Add a channel from chat.** "Connect our WhatsApp" gets a guided walkthrough on the current channel.
+- [ ] 2.4 **Onboarding.** An onboarding conversation that saves its answers as team memory and offers 3 starter tasks as choices.
+- [ ] 2.5 **Configure by chat.** Configure from chat: which chats it answers in, schedules, permissions and provider.
+- [ ] 2.6 **Home screens.**
+  - Slack App Home
+  - Telegram commands menu
+  - Discord slash commands
+  - a `/status` card everywhere
+  - a localhost admin console
+- [ ] 2.7 **Commands and errors.** The same commands everywhere (/help, /status, /usage, /memory, /permissions, /tasks, /provider, plus !stop, !mute, !fast and !deep), and friendly errors with an admin alert.
+- [ ] 2.8 **Native behaviour.**
+  - An instant ack and progress updates.
+  - Rework choices.
+  - Telegram forum topics.
+  - WhatsApp voice replies (opt-in).
+  - In groups, reply only when addressed.
+  - Log every reply/no-reply decision.
 
-## Task 2 — Host-exec approval notifications over messaging
+## Milestone 3: trust and cost
 
-**Objective:** Before running dangerous host terminal commands requested via `host_exec`, notify an owner/admin through the existing approval-card system and run the command only after approval.
+- [ ] 3.1 **Usage ledger.** Usage ledger plus budgets, alerts and pause-and-queue.
+- [ ] 3.2 **Policies.** Allow/ask/deny policies with risk labels, scoped "always allow" and `/permissions`.
+- [ ] 3.3 **Claim-receipt gate.** Claim-receipt gate and idempotency keys.
+- [ ] 3.4 **Egress guard.** Audience-aware egress guard across channels.
+- [ ] 3.5 **RBAC.** RBAC (Owner, Admin, Approver, User, Auditor) on linked identities, plus policies for unknown senders.
 
-**Files:**
-- Modify: `src/modules/host-exec/index.ts`
-- Possibly modify: `src/modules/approvals/response-handler.ts` only if reject path must write a response to waiting tool call
-- Test: new `src/modules/host-exec/index.test.ts`
+## Milestone 4: capabilities
 
-**Plan:**
-1. Add a conservative dangerous-command classifier in host-exec:
-   - dangerous examples: `sudo`, `rm -rf`, `launchctl`, `systemctl`, `kill`, `pkill`, `docker stop/rm`, `git reset --hard`, `git clean`, package installs, shell scripts via `curl | sh`.
-   - non-dangerous examples: `pwd`, `ls`, `git status`, `date`, simple reads.
-2. If `allowHostExec` is false: existing permission-denied response unchanged.
-3. If command is safe: execute immediately as today.
-4. If command is dangerous:
-   - unlink request before action as today to avoid replay loops.
-   - create a pending approval with action `host_exec` using existing `requestApproval()`.
-   - payload includes request id, response path, command, cwd, and timeout.
-   - approval card title: `Approve host terminal command?`
-   - question includes agent/session, cwd, timeout, and command in a code block.
-   - do not run command yet.
-5. Register an approval handler for `host_exec` in the host-exec module:
-   - on approve, execute command and write response JSON to the stored response path.
-   - notify the agent that the command was approved and executed.
-6. Ensure rejection writes a response JSON too, so the waiting `host_exec` tool returns a clear denial instead of timing out. Prefer extending approval handler context with selected option only if necessary and backwards-compatible.
-7. Add tests for safe immediate execution, dangerous approval request, approved execution writes response, rejected command writes denial response, allowHostExec false remains denied.
+- [ ] 4.1 **Integration SDK.** Integration SDK with host-held credentials and approval before sending.
+- [ ] 4.2 **Cheap crons.** Gated crons that are cheap to run.
+- [ ] 4.3 **Deliverables.** Deliverables sent as native files on each channel, plus signed hosted pages.
+- [ ] 4.4 **Media and voice.** Media in and voice out everywhere.
+- [ ] 4.5 **Takeover browser.**
+- [ ] 4.6 **DuckDB data.** Read-only DuckDB data access.
+- [ ] 4.7 **Skills library.** Pinned skills library.
+- [ ] 4.8 **Proactivity.** Opt-in proactivity.
+- [ ] 4.9 **Model routing.** Model routing presets.
+- [ ] 4.10 **Remaining channels.** Bring the remaining channels onto the contract suite.
 
-**Acceptance criteria:**
-- Dangerous host-exec commands produce a messaging approval card to an eligible admin/owner.
-- Approved command runs and returns stdout/stderr/exit code to the waiting container tool.
-- Rejected command returns an explicit denied response to the tool; no timeout.
-- Safe commands still work without approval.
-- No replay loop risk: request files are unlinked before command/approval.
+## Quality bar
 
----
-
-## Task 3 — Verification, commit, push
-
-**Commands:**
-- `pnpm test -- src/command-gate.test.ts`
-- Focused runner/host-exec tests as added.
-- `pnpm test`
-- `pnpm typecheck`
-- `pnpm build`
-- `git diff --check`
-- `git status --short`
-
-**Commit/push:**
-- Commit message: `feat: centralize commands and approve host exec`
-- Push: `git push origin main`
-
----
-
-## Review section
-
-Implemented and verified.
-
-**Summary:**
-- Added `src/shared/commands.ts` as the shared slash-command registry used by host `gateCommand()` and the container runner formatter.
-- Mounted `src/shared` read-only into agent containers at `/shared` so the runner import resolves inside the container.
-- Added exact-token slash-command behavior so `/clearfoo`/`/startnow` remain unknown passthrough commands.
-- Added host-exec dangerous-command classification and approval-card flow for sensitive host terminal requests.
-- Added approval rejection handlers so rejected `host_exec` requests write an explicit denial response instead of timing out.
-
-**Verification:**
-- `pnpm typecheck` passed.
-- `pnpm test` passed: 30 files, 240 tests.
-- `pnpm build` passed.
-- `git diff --check` passed.
-
----
-
-# Dual provider: Claude + Codex in one install (branch `feat/dual-provider`)
-
-**Goal:** Any agent group or session can run on Claude (Claude Agent SDK + Claude Code) or Codex, in one image, switchable at runtime.
-
-- [x] Container: ship both providers (`providers/claude.ts` ported from clawbridge-agent, `@anthropic-ai/claude-agent-sdk` + lockfile, Dockerfile installs both CLIs behind `INSTALL_CLAUDE` / `INSTALL_CODEX`).
-- [x] Runner reads the host-resolved provider from `CLAWBRIDGE_PROVIDER` (previously per-session/group overrides never reached the container).
-- [x] Host: `src/providers/claude.ts` (settings.json + credential, OAuth preferred over API key), `providers/state-dir.ts` (`.claude-shared` / `.codex-shared` per provider), composed instructions mounted as both `AGENTS.md` and `CLAUDE.md`, duplicate `.codex` mount removed.
-- [x] Install default via `DEFAULT_AGENT_PROVIDER`; `AGENT_PROVIDER` stays a legacy migration marker.
-- [x] `/provider` host command (show / group / session / default) + provider line in `/status`.
-- [x] Host LLM calls (`extractor`, `reflection-agent`, `cross-client`, `error-handler`) go through `host-llm.ts` → `codex exec` or `claude -p`.
-- [x] Setup wizard: choose providers + default, Claude auth (`claude setup-token` or paste); doctor/verify/probe check each enabled provider; clawbridge-agent migration keeps Claude as the default.
-- [x] Tests: `codex-port.test.ts` → `provider-port.test.ts` (dual-provider invariants), new `host-llm.test.ts`, `host-commands/provider.test.ts`, migration carry-over test, Claude factory test.
+- **Eval suite.** 30–50 two-sided tasks, run on both providers and every first-class channel, pass^3, with reply/no-reply grading and a cross-channel leak canary. Runs in nightly CI.
+- **Proof before done.** Every item ships with tests, and gets live-check steps per channel at the end of its milestone.
 
 ## Review
 
-- Host: `tsc` clean; vitest 250/252 pass. The 2 failures (`memory/hindsight.test.ts`) also fail on the base commit.
-- Runner: `bun install --frozen-lockfile` accepts the lockfile; `bun test` 23 pass / 6 fail. The same 6 fail on the base commit (missing `/shared` mount outside the container, session-state tests). The new Claude factory test passes.
-- Lint: 33 errors vs 34 on base, none in changed files.
-- **Not verified:** `docker build` of the image and a live Claude/Codex round-trip (no Docker on the dev machine). Hindsight's own LLM still uses `openai-codex`, so a Claude-only install needs Hindsight pointed at another LLM.
+(Filled in at the end of each milestone.)
