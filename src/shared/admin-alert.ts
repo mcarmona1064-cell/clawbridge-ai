@@ -1,40 +1,56 @@
 /**
- * Platform-agnostic admin alert.
+ * Admin alerts (startup errors, health problems, sweeps).
  *
- * Delivers to all active messaging platforms via their channel adapters.
- * Falls back to direct Telegram API when adapters are not yet initialized
- * (e.g. early startup, before initChannelAdapters completes).
+ * Alerts go only to the people who run this install: every owner and
+ * global admin, once each, to the chat they chose with /notify-here or
+ * else their DM on any linked account. They never go to group chats or to
+ * the customers an agent talks to. If no admin is reachable yet (early
+ * startup), the direct Telegram fallback is used when it is configured.
  */
-import { getActiveAdapters } from '../channels/channel-registry.js';
-import { getAllMessagingGroups } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import { readEnvFile } from '../env.js';
 
+/** Alerts are written with Telegram-style <b> tags; turn them into Markdown for every channel. */
+export function alertMarkdown(text: string): string {
+  return text
+    .replace(/<b>([\s\S]*?)<\/b>/g, '**$1**')
+    .replace(/<i>([\s\S]*?)<\/i>/g, '_$1_')
+    .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
+    .replace(/<[^>]+>/g, '');
+}
+
 export async function sendAdminAlert(text: string): Promise<void> {
   try {
-    const adapters = getActiveAdapters();
-    if (adapters.length > 0) {
-      const groups = getAllMessagingGroups();
-      const adapterMap = new Map(adapters.map((a) => [a.channelType, a]));
-      const sent = new Set<string>();
-      for (const mg of groups) {
-        const adapter = adapterMap.get(mg.channel_type);
-        if (!adapter || !adapter.isConnected()) continue;
-        const key = mg.channel_type + ':' + mg.platform_id;
-        if (sent.has(key)) continue;
-        sent.add(key);
+    const { getDeliveryAdapter } = await import('../delivery.js');
+    const { pickApprover, pickApprovalDelivery } = await import('../modules/approvals/primitive.js');
+    const { primaryUserId } = await import('../db/user-links.js');
+    const adapter = getDeliveryAdapter();
+    let delivered = 0;
+    if (adapter) {
+      const people = new Set<string>();
+      for (const userId of pickApprover(null)) {
+        const person = primaryUserId(userId);
+        if (people.has(person)) continue;
+        people.add(person);
+        const target = await pickApprovalDelivery([userId], '');
+        if (!target) continue;
         try {
-          await adapter.deliver(mg.platform_id, null, { kind: 'chat', content: { text } });
+          await adapter.deliver(
+            target.messagingGroup.channel_type,
+            target.messagingGroup.platform_id,
+            null,
+            'chat',
+            JSON.stringify({ text: alertMarkdown(text) }),
+          );
+          delivered++;
         } catch (err) {
-          log.warn('Admin alert delivery failed', { channelType: mg.channel_type, platformId: mg.platform_id, err });
+          log.warn('Admin alert delivery failed', { userId: target.userId, err });
         }
       }
-      return;
     }
-    // Fallback: direct Telegram API when adapters not yet active
-    await telegramFallback(text);
-  } catch {
-    /* non-critical */
+    if (delivered === 0) await telegramFallback(text);
+  } catch (err) {
+    log.warn('Admin alert failed', { err });
   }
 }
 
