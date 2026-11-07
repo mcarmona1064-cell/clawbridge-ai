@@ -351,9 +351,18 @@ async function main(): Promise<void> {
   {
     const { PROXY_ENV_KEYS, startCredentialProxy } = await import('./credential-proxy.js');
     const { readEnvFile } = await import('./env.js');
-    await startCredentialProxy({ ...readEnvFile([...PROXY_ENV_KEYS]), ...process.env }).catch((err) =>
+    const proxyEnv = { ...readEnvFile([...PROXY_ENV_KEYS]), ...process.env };
+    await startCredentialProxy(proxyEnv).catch((err) =>
       log.error('Credential proxy failed to start; containers get credentials directly', { err }),
     );
+    // EGRESS_LOCKDOWN=on: internal network + relay, so the proxy is the only way out.
+    const { lockdownEnabled, ensureLockdown } = await import('./egress-lockdown.js');
+    const { proxyPort, setLockdownActive } = await import('./credential-proxy.js');
+    const port = proxyPort();
+    if (lockdownEnabled(proxyEnv) && port) {
+      const { CONTAINER_IMAGE } = await import('./config.js');
+      setLockdownActive(ensureLockdown(CONTAINER_IMAGE, port));
+    }
   }
 
   // 5c. Local admin console (token-protected, read-only).

@@ -78,15 +78,21 @@ Messages and task operations are verified against group identity:
 - **Verified so far:** Claude Code inside a container sends the placeholder to the proxy as `Authorization: Bearer cbp_…`, after an unauthenticated `HEAD /api/hello` probe that the proxy lets through. The full round trip to Anthropic with a real token has not been tested yet.
 - **Direct (when `CREDENTIAL_PROXY` is unset):** the credential is passed with `-e` to `docker run`, so code the agent runs can read it.
   - **Claude:** the subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) or `ANTHROPIC_API_KEY` from `~/.clawbridge/.env`.
-- **Codex** (either way): `~/.codex/auth.json`, including its refresh token, is copied into the group's `.codex-shared/` state dir, which is mounted read-write at `/home/node/.codex`.
-  - Codex refreshes and rewrites this file itself, so it is not proxied yet.
+- **Codex** (either way): `~/.codex/auth.json`, including its refresh token, is copied into the group's `.codex-shared/` state dir at every spawn.
+  - By default it is writable at `/home/node/.codex/auth.json`, because Codex rewrites it when it refreshes tokens.
+  - `CODEX_AUTH_READONLY=on` mounts it read-only, so code in the container can't overwrite or plant credentials. Keep `codex` signed in on the host: the host copy is re-synced on every spawn.
   - Each group gets its own copy; the host's own file is never mounted.
 
 **Outbound traffic.** With `EGRESS_PROXY=on`, every other HTTPS request from a container goes through the same host proxy (`HTTPS_PROXY`, CONNECT tunnels authenticated by the session placeholder).
 - The proxy refuses private, loopback, link-local and cloud-metadata addresses (for example `169.254.169.254` and the host's LAN).
 - With `EGRESS_ALLOWLIST=github.com,pypi.org,…` set, it refuses any other host.
 - Refusals are written to the audit log (`egress.blocked`).
-- **Limit:** a process inside the container that ignores `HTTPS_PROXY` can still open direct connections. Network-level lockdown (an internal Docker network whose only route out is the proxy) is the next step.
+- **Limit:** without lockdown, a process inside the container that ignores `HTTPS_PROXY` can still open direct connections.
+- **Network lockdown.** `EGRESS_LOCKDOWN=on` closes that gap.
+  - Agent containers run on an internal Docker network (`clawbridge-egress`) with no route out.
+  - The only exit is a tiny relay container (`egress`) that forwards to the host proxy and holds no credentials.
+  - Lockdown turns the egress proxy on.
+  - Services on the host that containers used directly (such as a local Ollama) must then be reached through the proxy, or stay unlocked.
 
 **What never reaches a container:**
 - `~/.clawbridge/.env` itself, channel tokens (Slack, Telegram, …), Hindsight credentials, and the integration server's secrets — host only
@@ -97,7 +103,7 @@ Messages and task operations are verified against group identity:
 
 **Known limitations:**
 - Without `CREDENTIAL_PROXY=on`, a prompt-injected agent could read the Claude credential and send it elsewhere.
-- The Codex `auth.json` is readable inside the container in every mode.
+- The Codex `auth.json` is readable inside the container in every mode, and writable unless `CODEX_AUTH_READONLY=on`.
 - Use a dedicated key or subscription seat for ClawBridge, and rotate it if an agent may have been compromised.
 
 ### 6. Host Commands (`host_exec`)

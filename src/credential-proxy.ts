@@ -29,6 +29,7 @@ import https from 'https';
 import net from 'net';
 
 import { audit } from './audit.js';
+import { lockdownProxyBase } from './egress-lockdown.js';
 import { log } from './log.js';
 
 export interface Upstream {
@@ -268,13 +269,24 @@ export class CredentialProxy {
 let instance: CredentialProxy | null = null;
 let boundPort: number | null = null;
 let egressEnabled = false;
+let lockdownActive = false;
 
-export function credentialProxyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CREDENTIAL_PROXY === 'on' || env.EGRESS_PROXY === 'on';
+/** Containers are on the locked-down network; the proxy is reached through the relay. */
+export function setLockdownActive(on: boolean): void {
+  lockdownActive = on;
 }
 
+export function isLockdownActive(): boolean {
+  return lockdownActive;
+}
+
+export function credentialProxyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CREDENTIAL_PROXY === 'on' || env.EGRESS_PROXY === 'on' || env.EGRESS_LOCKDOWN === 'on';
+}
+
+/** Lockdown needs the egress proxy: it is the containers' only way out. */
 export function egressProxyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.EGRESS_PROXY === 'on';
+  return env.EGRESS_PROXY === 'on' || env.EGRESS_LOCKDOWN === 'on';
 }
 
 export async function startCredentialProxy(env: NodeJS.ProcessEnv = process.env): Promise<CredentialProxy | null> {
@@ -302,7 +314,12 @@ export function getCredentialProxy(): CredentialProxy | null {
 
 /** Base URL containers use to reach the proxy. */
 export function proxyBaseUrl(): string | null {
-  return boundPort ? `http://host.docker.internal:${boundPort}` : null;
+  if (!boundPort) return null;
+  return lockdownActive ? lockdownProxyBase(boundPort) : `http://host.docker.internal:${boundPort}`;
+}
+
+export function proxyPort(): number | null {
+  return boundPort;
 }
 
 /** Settings come from ~/.clawbridge/.env, overridden by the service environment. */
@@ -312,6 +329,7 @@ export const PROXY_ENV_KEYS = [
   'EGRESS_ALLOWLIST',
   'CREDENTIAL_PROXY_PORT',
   'CREDENTIAL_PROXY_BIND',
+  'EGRESS_LOCKDOWN',
 ] as const;
 
 /**
@@ -346,7 +364,7 @@ export function proxiedCredentialEnv(
     env.https_proxy = proxyUrl;
     env.HTTP_PROXY = proxyUrl;
     env.http_proxy = proxyUrl;
-    env.NO_PROXY = 'host.docker.internal,localhost,127.0.0.1';
+    env.NO_PROXY = 'egress,host.docker.internal,localhost,127.0.0.1';
     env.no_proxy = env.NO_PROXY;
   }
   return env;

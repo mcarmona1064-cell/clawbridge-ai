@@ -44,7 +44,8 @@ import {
   writeSessionRouting,
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
-import { revokeSessionCredentials } from './credential-proxy.js';
+import { isLockdownActive, revokeSessionCredentials } from './credential-proxy.js';
+import { lockdownNetworkArgs } from './egress-lockdown.js';
 import { modelEnv } from './model-presets.js';
 import { installedSkillsDir } from './modules/skills/paths.js';
 
@@ -610,6 +611,8 @@ async function buildContainerArgs(
   // Hardening: no Linux capabilities, no privilege escalation, and resource
   // limits so a runaway agent can't exhaust the host.
   args.push(...containerHardeningArgs());
+  // Locked-down network: no route out except the egress relay.
+  if (isLockdownActive()) args.push(...lockdownNetworkArgs());
 
   // User mapping
   const hostUid = process.getuid?.();

@@ -18,6 +18,7 @@ import path from 'path';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 import { providerStateDir } from './state-dir.js';
 import { proxiedCredentialEnv } from '../credential-proxy.js';
+import { readEnvFile } from '../env.js';
 
 function syncCodexOAuthAuth(codexDir: string): void {
   const hostAuth = path.join(os.homedir(), '.codex', 'auth.json');
@@ -49,5 +50,17 @@ registerProviderContainerConfig('codex', ({ agentGroupId, sessionDir }) => {
   // which container-runner bind-mounts from codexDir. Explicitly do NOT
   // forward OPENAI_API_KEY. With EGRESS_PROXY=on, only the proxy env is added.
   const proxied = proxiedCredentialEnv(path.basename(sessionDir), null);
-  return proxied && Object.keys(proxied).length > 0 ? { env: proxied } : {};
+  // CODEX_AUTH_READONLY=on mounts auth.json read-only over the writable
+  // state dir, so code in the container can't overwrite or plant credentials.
+  // Codex can then no longer save refreshed tokens itself; the host copy is
+  // re-synced on every spawn, so keep `codex` signed in on the host.
+  const authFile = path.join(codexDir, 'auth.json');
+  const readonlyAuth =
+    readEnvFile(['CODEX_AUTH_READONLY']).CODEX_AUTH_READONLY === 'on' && fs.existsSync(authFile)
+      ? [{ hostPath: authFile, containerPath: '/home/node/.codex/auth.json', readonly: true }]
+      : [];
+  return {
+    ...(proxied && Object.keys(proxied).length > 0 ? { env: proxied } : {}),
+    ...(readonlyAuth.length ? { mounts: readonlyAuth } : {}),
+  };
 });
