@@ -105,6 +105,19 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/memory': {
+        const { memoryCommand } = await import('./memory-cmd.js');
+        write(
+          await memoryCommand({
+            agentGroupId: ctx.agentGroup.id,
+            messagingGroupId: ctx.mg.id,
+            isGroup: ctx.mg.is_group === 1,
+            userId: ctx.userId,
+            args: ctx.args,
+          }),
+        );
+        return;
+      }
       case '/roles': {
         const { rolesCommand } = await import('./roles-cmd.js');
         write(
