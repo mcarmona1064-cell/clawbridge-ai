@@ -30,6 +30,7 @@ import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 import { audit } from './audit.js';
 import { rewriteAgentError } from './friendly-errors.js';
+import { gateClaims, recordSessionAction } from './claim-gate.js';
 import { sendAdminAlert } from './shared/admin-alert.js';
 
 function extractText(jsonContent: string): string {
@@ -432,6 +433,13 @@ async function deliverMessage(
 
   // Agent errors: a plain-language message for the person, details for the admin.
   let outboundContent = msg.content;
+
+  // A reply that claims a host action (scheduled, saved, posted) with no
+  // matching action on record gets an honest correction appended.
+  if (msg.kind === 'chat' && typeof content.text === 'string' && !content.operation && !content.agentError) {
+    const gated = gateClaims(session.id, session.agent_group_id, content.text);
+    if (gated.flagged.length > 0) outboundContent = JSON.stringify({ ...content, text: gated.text });
+  }
   if (typeof content.agentError === 'string') {
     const agentName = getAgentGroup(session.agent_group_id)?.name ?? 'Your agent';
     const rewritten = rewriteAgentError(content, session.agent_group_id, agentName);
@@ -514,6 +522,7 @@ async function handleSystemAction(
 ): Promise<void> {
   const action = content.action as string;
   log.info('System action from agent', { sessionId: session.id, action });
+  if (action && action !== 'record_usage') recordSessionAction(session.id, action);
 
   const registered = actionHandlers.get(action);
   if (registered) {
