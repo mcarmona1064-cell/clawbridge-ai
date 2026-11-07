@@ -165,16 +165,16 @@ function protectCode(md: string): Protected {
   const stash: Array<{ code: string; fenced: boolean; lang: string }> = [];
   let text = md.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_m, lang: string, code: string) => {
     stash.push({ code: code.replace(/\n$/, ''), fenced: true, lang });
-    return `\u0000${stash.length - 1}\u0000`;
+    return `\uE000${stash.length - 1}\uE000`;
   });
   text = text.replace(/`([^`\n]+)`/g, (_m, code: string) => {
     stash.push({ code, fenced: false, lang: '' });
-    return `\u0000${stash.length - 1}\u0000`;
+    return `\uE000${stash.length - 1}\uE000`;
   });
   return {
     text,
     restore: (s, wrap) =>
-      s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => {
+      s.replace(/\uE000(\d+)\uE000/g, (_m, i: string) => {
         const e = stash[Number(i)];
         return wrap(e.code, e.fenced, e.lang);
       }),
@@ -218,7 +218,7 @@ export function toTelegramHtml(md: string): string {
 export function toWhatsApp(md: string): string {
   const p = protectCode(md);
   let s = p.text;
-  const BOLD = '\u0001';
+  const BOLD = '\uE001';
   s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_m, t: string, u: string) => (t === u ? u : `${t} (${u})`));
   s = s.replace(/^#{1,6}\s+(.+)$/gm, `${BOLD}$1${BOLD}`);
   s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, `${BOLD}$1${BOLD}`);
@@ -266,17 +266,26 @@ export function renderMarkdown(md: string, dialect: FormatDialect): string {
 
 /**
  * Split Markdown at `limit` (measured after rendering) and render each
- * chunk. Rendering can lengthen text (HTML escapes), so chunks that come out
- * too long are split again with a smaller budget.
+ * chunk, keeping the source Markdown alongside so a caller can fall back to
+ * plain text for one chunk. Rendering can lengthen text (HTML escapes), so
+ * chunks that come out too long are split again with a smaller budget.
  */
-export function renderChunks(md: string, dialect: FormatDialect, limit: number): string[] {
+export function renderChunkPairs(
+  md: string,
+  dialect: FormatDialect,
+  limit: number,
+): Array<{ md: string; out: string }> {
   let budget = limit;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const out = splitText(md, budget).map((c) => renderMarkdown(c, dialect));
-    if (out.every((c) => c.length <= limit)) return out;
+    const pairs = splitText(md, budget).map((c) => ({ md: c, out: renderMarkdown(c, dialect) }));
+    if (pairs.every((p) => p.out.length <= limit)) return pairs;
     budget = Math.floor(budget * 0.8);
   }
-  return splitText(md, Math.floor(limit / 2)).map((c) => renderMarkdown(c, dialect).slice(0, limit));
+  return splitText(md, Math.floor(limit / 2)).map((c) => ({ md: c, out: renderMarkdown(c, dialect).slice(0, limit) }));
+}
+
+export function renderChunks(md: string, dialect: FormatDialect, limit: number): string[] {
+  return renderChunkPairs(md, dialect, limit).map((p) => p.out);
 }
 
 // ── Dedupe ──
@@ -295,4 +304,38 @@ export class SeenSet {
     }
     return false;
   }
+}
+
+// ── Emoji ──
+
+const EMOJI: Record<string, string> = {
+  eyes: '👀',
+  white_check_mark: '✅',
+  heavy_check_mark: '✔️',
+  x: '❌',
+  warning: '⚠️',
+  thumbsup: '👍',
+  '+1': '👍',
+  thumbsdown: '👎',
+  '-1': '👎',
+  ok_hand: '👌',
+  fire: '🔥',
+  tada: '🎉',
+  heart: '❤️',
+  pray: '🙏',
+  thinking_face: '🤔',
+  hourglass: '⏳',
+  hourglass_flowing_sand: '⏳',
+  zap: '⚡',
+  writing_hand: '✍️',
+  memo: '📝',
+  rocket: '🚀',
+  '100': '💯',
+};
+
+/** Unicode emoji for a Slack-style name (`eyes`, `:tada:`), or the input if it already is one. */
+export function emojiFor(nameOrEmoji: string): string | null {
+  const name = nameOrEmoji.replace(/^:|:$/g, '');
+  if (EMOJI[name]) return EMOJI[name];
+  return /\p{Extended_Pictographic}/u.test(name) ? name : null;
 }

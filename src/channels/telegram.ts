@@ -24,6 +24,21 @@ import type {
   OutboundMessage,
 } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { recordNumberedPrompt } from './channel-layer.js';
+import {
+  choiceId,
+  escapeHtml,
+  fitLabel,
+  numberedChoicesText,
+  parseChoiceId,
+  parseOutbound,
+  renderChunkPairs,
+  renderChunks,
+  resolveChoiceValue,
+  selectedLabelFor,
+  toPlain,
+} from './render.js';
+import type { NormalizedOption } from './ask-question.js';
 import { COMMAND_REGISTRY } from '../shared/commands.js';
 import { interceptPairingMessage } from './telegram-pairing.js';
 import { transcribeAudio } from '../transcription.js';
@@ -31,6 +46,33 @@ import { transcribeAudio } from '../transcription.js';
 const API_BASE = 'https://api.telegram.org';
 const LONG_POLL_TIMEOUT_S = 25;
 const INBOUND_FILE_SIZE_CAP = 50 * 1024 * 1024; // 50 MB
+const TG_MAX_TEXT = 4096;
+const TG_CALLBACK_DATA_MAX = 64;
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+/**
+ * Reactions Telegram accepts, keyed by the names agents use. Telegram only
+ * allows a fixed emoji set; anything else is skipped rather than failing.
+ */
+const TG_REACTIONS: Record<string, string> = {
+  eyes: '👀',
+  white_check_mark: '👌',
+  heavy_check_mark: '👌',
+  ok_hand: '👌',
+  thumbsup: '👍',
+  '+1': '👍',
+  thumbsdown: '👎',
+  '-1': '👎',
+  fire: '🔥',
+  tada: '🎉',
+  heart: '❤',
+  pray: '🙏',
+  thinking_face: '🤔',
+  hourglass: '⚡',
+  zap: '⚡',
+  writing_hand: '✍',
+  '100': '💯',
+};
 
 interface TgUser {
   id: number;
@@ -134,10 +176,30 @@ interface TgFile {
   file_path?: string;
 }
 
+interface TgCallbackQuery {
+  id: string;
+  from: TgUser;
+  message?: TgMessage;
+  data?: string;
+}
+
 interface TgUpdate {
   update_id: number;
   message?: TgMessage;
   edited_message?: TgMessage;
+  callback_query?: TgCallbackQuery;
+}
+
+/** Thrown for Bot API errors so delivery can retry or mark the message failed. */
+export class TelegramApiError extends Error {
+  constructor(
+    readonly method: string,
+    readonly status: number,
+    readonly description: string,
+  ) {
+    super(`Telegram ${method} failed: ${status} ${description}`);
+    this.name = 'TelegramApiError';
+  }
 }
 
 interface TgResponse<T> {
@@ -181,16 +243,12 @@ function detectMention(msg: TgMessage, botUsername: string | null): boolean {
   return false;
 }
 
-function extractText(message: OutboundMessage): string | null {
-  const content = message.content as Record<string, unknown> | string | undefined;
-  if (typeof content === 'string') return content;
-  if (content && typeof content === 'object' && typeof content.text === 'string') {
-    return content.text;
-  }
-  return null;
-}
-
-async function tgGet<T>(token: string, method: string, params: Record<string, string | number>): Promise<T> {
+async function tgGet<T>(
+  token: string,
+  method: string,
+  params: Record<string, string | number>,
+  attempt = 0,
+): Promise<T> {
   const url = new URL(`${API_BASE}/bot${token}/${method}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   let res: Response;
@@ -201,16 +259,16 @@ async function tgGet<T>(token: string, method: string, params: Record<string, st
   }
   const body = (await res.json().catch(() => ({}))) as TgResponse<T>;
   if (!res.ok || !body.ok) {
-    if (res.status === 429 && body.parameters?.retry_after) {
-      await new Promise((r) => setTimeout(r, body.parameters!.retry_after! * 1000));
-      return tgGet<T>(token, method, params);
+    if (res.status === 429 && body.parameters?.retry_after && attempt < MAX_RATE_LIMIT_RETRIES) {
+      await new Promise((r) => setTimeout(r, Math.min(body.parameters!.retry_after!, 30) * 1000));
+      return tgGet<T>(token, method, params, attempt + 1);
     }
-    throw new Error(`Telegram ${method} failed: ${res.status} ${body.description ?? ''}`);
+    throw new TelegramApiError(method, res.status, body.description ?? '');
   }
   return body.result as T;
 }
 
-async function tgPost<T>(token: string, method: string, body: Record<string, unknown>): Promise<T> {
+async function tgPost<T>(token: string, method: string, body: Record<string, unknown>, attempt = 0): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/bot${token}/${method}`, {
@@ -223,11 +281,11 @@ async function tgPost<T>(token: string, method: string, body: Record<string, unk
   }
   const json = (await res.json().catch(() => ({}))) as TgResponse<T>;
   if (!res.ok || !json.ok) {
-    if (res.status === 429 && json.parameters?.retry_after) {
-      await new Promise((r) => setTimeout(r, json.parameters!.retry_after! * 1000));
-      return tgPost<T>(token, method, body);
+    if (res.status === 429 && json.parameters?.retry_after && attempt < MAX_RATE_LIMIT_RETRIES) {
+      await new Promise((r) => setTimeout(r, Math.min(json.parameters!.retry_after!, 30) * 1000));
+      return tgPost<T>(token, method, body, attempt + 1);
     }
-    throw new Error(`Telegram ${method} failed: ${res.status} ${json.description ?? ''}`);
+    throw new TelegramApiError(method, res.status, json.description ?? '');
   }
   return json.result as T;
 }
@@ -267,9 +325,32 @@ async function tgPostMultipart<T>(
   }
   const json = (await res.json().catch(() => ({}))) as TgResponse<T>;
   if (!res.ok || !json.ok) {
-    throw new Error(`Telegram ${method} failed: ${res.status} ${json.description ?? ''}`);
+    throw new TelegramApiError(method, res.status, json.description ?? '');
   }
   return json.result as T;
+}
+
+/** Inline keyboard for a question card: one button per row, or two when labels are short. */
+export function telegramKeyboard(
+  questionId: string,
+  options: NormalizedOption[],
+): Array<Array<{ text: string; callback_data: string }>> | null {
+  const buttons = options.map((o, idx) => ({ text: fitLabel(o.label, 64), callback_data: choiceId(questionId, idx) }));
+  if (buttons.some((b) => Buffer.byteLength(b.callback_data) > TG_CALLBACK_DATA_MAX)) return null;
+  const pairUp = buttons.length > 2 && buttons.every((b) => b.text.length <= 18);
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (let i = 0; i < buttons.length; i += pairUp ? 2 : 1) rows.push(buttons.slice(i, i + (pairUp ? 2 : 1)));
+  return rows;
+}
+
+/** Send method and field for an outbound file, by type. */
+export function telegramFileMethod(filename: string): { method: string; field: string } {
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return { method: 'sendPhoto', field: 'photo' };
+  if (['mp4', 'mov'].includes(ext)) return { method: 'sendVideo', field: 'video' };
+  if (['ogg', 'oga', 'opus'].includes(ext)) return { method: 'sendVoice', field: 'voice' };
+  if (['mp3', 'm4a', 'wav'].includes(ext)) return { method: 'sendAudio', field: 'audio' };
+  return { method: 'sendDocument', field: 'document' };
 }
 
 function createAdapter(): ChannelAdapter | null {
@@ -287,10 +368,16 @@ function createAdapter(): ChannelAdapter | null {
         const updates = await tgGet<TgUpdate[]>(token, 'getUpdates', {
           offset: lastUpdateId + 1,
           timeout: LONG_POLL_TIMEOUT_S,
-          allowed_updates: '["message","edited_message"]',
+          allowed_updates: '["message","edited_message","callback_query"]',
         });
         for (const upd of updates) {
-          lastUpdateId = Math.max(lastUpdateId, upd.update_id);
+          // Telegram re-sends anything not yet confirmed by the offset; skip what we've handled.
+          if (upd.update_id <= lastUpdateId) continue;
+          lastUpdateId = upd.update_id;
+          if (upd.callback_query) {
+            await handleCallback(upd.callback_query, config);
+            continue;
+          }
           const msg = upd.message;
           if (!msg) continue;
           await handleMessage(msg, config);
@@ -315,6 +402,26 @@ function createAdapter(): ChannelAdapter | null {
         await new Promise((r) => setTimeout(r, 5000));
       }
     }
+  }
+
+  /** A button on a question/approval card was pressed. */
+  async function handleCallback(cb: TgCallbackQuery, config: ChannelSetup): Promise<void> {
+    const parsed = cb.data ? parseChoiceId(cb.data) : null;
+    // Always answer the callback so the client stops showing a spinner.
+    await tgPost(token, 'answerCallbackQuery', { callback_query_id: cb.id }).catch(() => undefined);
+    if (!parsed) return;
+    const value = resolveChoiceValue(parsed.questionId, parsed.idx);
+    const chosen = selectedLabelFor(parsed.questionId, parsed.idx) ?? value;
+    if (cb.message) {
+      const original = cb.message.text ?? '';
+      await tgPost(token, 'editMessageText', {
+        chat_id: cb.message.chat.id,
+        message_id: cb.message.message_id,
+        text: `${original}\n\n${chosen} · ${senderName(cb.from)}`.slice(0, TG_MAX_TEXT),
+        reply_markup: { inline_keyboard: [] },
+      }).catch((err) => log.debug('Telegram: could not update card after click', { err: (err as Error).message }));
+    }
+    config.onAction(parsed.questionId, value, String(cb.from.id));
   }
 
   async function transcribeVoice(msg: TgMessage): Promise<string | null> {
@@ -451,6 +558,33 @@ function createAdapter(): ChannelAdapter | null {
     }
   }
 
+  /**
+   * Send Markdown as Telegram HTML, split at 4096 characters. If Telegram
+   * rejects the markup, resend that chunk as plain text rather than failing.
+   * Returns the first message's id.
+   */
+  async function sendText(chatId: string, markdown: string): Promise<string | undefined> {
+    let first: string | undefined;
+    for (const chunk of renderChunkPairs(markdown, 'telegram-html', TG_MAX_TEXT)) {
+      let sent: { message_id: number };
+      try {
+        sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
+          chat_id: chatId,
+          text: chunk.out,
+          parse_mode: 'HTML',
+        });
+      } catch (err) {
+        if (!(err instanceof TelegramApiError && /can't parse entities/i.test(err.description))) throw err;
+        sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
+          chat_id: chatId,
+          text: toPlain(chunk.md).slice(0, TG_MAX_TEXT),
+        });
+      }
+      first ??= String(sent.message_id);
+    }
+    return first;
+  }
+
   const adapter: ChannelAdapter = {
     name: 'telegram',
     channelType: 'telegram',
@@ -499,27 +633,66 @@ function createAdapter(): ChannelAdapter | null {
       return running && botUsername !== null;
     },
 
-    async deliver(platformId, _threadId, message: OutboundMessage): Promise<string | undefined> {
+    async deliver(platformId, threadId, message: OutboundMessage): Promise<string | undefined> {
       const chatId = platformId.startsWith('telegram:') ? platformId.slice('telegram:'.length) : platformId;
-      const text = extractText(message);
-      const files = message.files ?? [];
+      const files = (message.files ?? []) as OutboundFile[];
+      const op = parseOutbound(message);
+
+      if (op.op === 'edit') {
+        const [html] = renderChunks(op.text, 'telegram-html', TG_MAX_TEXT);
+        try {
+          await tgPost(token, 'editMessageText', {
+            chat_id: chatId,
+            message_id: Number(op.messageId),
+            text: html,
+            parse_mode: 'HTML',
+          });
+        } catch (err) {
+          if (!(err instanceof TelegramApiError && /not modified/i.test(err.description))) throw err;
+        }
+        return op.messageId;
+      }
+
+      if (op.op === 'reaction') {
+        const emoji = TG_REACTIONS[op.emoji] ?? (/\p{Extended_Pictographic}/u.test(op.emoji) ? op.emoji : null);
+        if (!emoji) return undefined;
+        await tgPost(token, 'setMessageReaction', {
+          chat_id: chatId,
+          message_id: Number(op.messageId),
+          reaction: [{ type: 'emoji', emoji }],
+        });
+        return undefined;
+      }
 
       let lastMessageId: string | undefined;
-      if (text) {
-        const sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
-          chat_id: chatId,
-          text,
-        });
-        lastMessageId = String(sent.message_id);
+      if (op.op === 'question') {
+        const keyboard = telegramKeyboard(op.questionId, op.options);
+        if (!keyboard) {
+          recordNumberedPrompt(op.questionId, 'telegram', platformId, threadId);
+          lastMessageId = await sendText(chatId, numberedChoicesText(op.title, op.question, op.options));
+        } else {
+          const body = `<b>${escapeHtml(op.title)}</b>${op.question ? `\n${renderChunks(op.question, 'telegram-html', 3500)[0]}` : ''}`;
+          const sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
+            chat_id: chatId,
+            text: body,
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: keyboard },
+          });
+          lastMessageId = String(sent.message_id);
+        }
+      } else if (op.op === 'text') {
+        lastMessageId = await sendText(chatId, op.text);
       }
-      for (const f of files as OutboundFile[]) {
+
+      for (const f of files) {
+        const { method, field } = telegramFileMethod(f.filename);
         const sent = await tgPostMultipart<{ message_id: number }>(
           token,
-          'sendDocument',
+          method,
           { chat_id: chatId },
-          { field: 'document', filename: f.filename, data: f.data },
+          { field, filename: f.filename, data: f.data },
         );
-        lastMessageId = String(sent.message_id);
+        lastMessageId ??= String(sent.message_id);
       }
       return lastMessageId;
     },

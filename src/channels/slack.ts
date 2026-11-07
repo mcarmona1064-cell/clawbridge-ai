@@ -162,7 +162,8 @@ export function questionMessage(
     text: `${title}: ${question}`.slice(0, SLACK_MAX_FALLBACK),
     blocks: [
       { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150), emoji: true } },
-      { type: 'section', text: { type: 'mrkdwn', text: question.slice(0, 3000) } },
+      // A markdown block renders the agent's standard Markdown (section mrkdwn would not).
+      ...(question ? [{ type: 'markdown', text: question.slice(0, 11_000) }] : []),
       {
         type: 'actions',
         block_id: `ncq:${questionId}`,
