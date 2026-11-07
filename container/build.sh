@@ -8,6 +8,7 @@
 #   INSTALL_CJK_FONTS=true   — add Chinese/Japanese/Korean fonts (~200MB)
 #   INSTALL_CLAUDE=false     — leave the Claude Code CLI out of the image
 #   INSTALL_CODEX=false      — leave the Codex CLI out of the image
+#   INSTALL_DUCKDB=false     — leave the DuckDB CLI (query_data) out of the image
 # Callers can also override by exporting these vars directly.
 
 set -e
@@ -40,7 +41,7 @@ if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
 fi
 
 # Provider CLIs baked into the image (both on by default).
-for flag in INSTALL_CLAUDE INSTALL_CODEX; do
+for flag in INSTALL_CLAUDE INSTALL_CODEX INSTALL_DUCKDB; do
     if [ -z "${!flag:-}" ] && [ -f "../.env" ]; then
         val="$(grep "^${flag}=" ../.env | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
         [ -n "$val" ] && printf -v "$flag" '%s' "$val"

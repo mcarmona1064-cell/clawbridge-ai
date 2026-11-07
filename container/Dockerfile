@@ -31,6 +31,9 @@ ARG CODEX_VERSION=0.165.0
 ARG AGENT_BROWSER_VERSION=0.27.0
 ARG VERCEL_VERSION=53.3.0
 ARG BUN_VERSION=1.3.12
+# DuckDB CLI for read-only analysis of workspace files (query_data tool).
+ARG INSTALL_DUCKDB=true
+ARG DUCKDB_VERSION=1.5.6
 ARG PNPM_VERSION=11.0.9
 
 # ---- System dependencies -----------------------------------------------------
@@ -78,6 +81,20 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" && \
     install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun && \
     rm -rf /root/.bun
+
+# ---- DuckDB (read-only data analysis) ----------------------------------------
+RUN if [ "$INSTALL_DUCKDB" = "true" ]; then \
+      set -e; \
+      case "$(dpkg --print-architecture)" in \
+        amd64) a=amd64 ;; \
+        arm64) a=arm64 ;; \
+        *) echo "DuckDB: unsupported architecture, skipping"; exit 0 ;; \
+      esac; \
+      curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${a}.gz" \
+        | gunzip > /usr/local/bin/duckdb; \
+      chmod 0755 /usr/local/bin/duckdb; \
+      duckdb --version; \
+    fi
 
 # ---- agent-runner deps -------------------------------------------------------
 # Deps are cached independently of CLI versions. Source is NOT baked in —
