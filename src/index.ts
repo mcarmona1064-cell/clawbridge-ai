@@ -366,6 +366,8 @@ async function main(): Promise<void> {
   {
     const { startIntegrationsWatcher } = await import('./modules/integrations/index.js');
     startIntegrationsWatcher();
+    const { startShareService } = await import('./modules/share/index.js');
+    startShareService();
   }
 
   // 7. Start health monitoring

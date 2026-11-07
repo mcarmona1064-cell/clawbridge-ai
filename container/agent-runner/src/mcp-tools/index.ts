@@ -13,6 +13,7 @@ import './self-mod.js';
 import './team-memory.js';
 import './host-exec.js';
 import './integrations.js';
+import './share.js';
 import { startMcpServer } from './server.js';
 
 function log(msg: string): void {
