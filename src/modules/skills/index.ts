@@ -20,6 +20,7 @@ import os from 'os';
 import path from 'path';
 
 import { audit } from '../../audit.js';
+import { registerDeliveryAction } from '../../delivery.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { registerApprovalHandler, requestApproval } from '../approvals/index.js';
@@ -289,3 +290,66 @@ registerApprovalHandler('skill_install', async ({ payload, userId, notify }) => 
   log.info('Skill installed', { name: p.name, repo: p.ref.repo, sha: p.ref.sha });
   notify(`Skill "${p.name}" installed. It is available in new conversations.`);
 });
+
+// ── Record-to-skill: the agent proposes a procedure it worked out ──
+
+/** Validate a proposed local skill. */
+export function validateProposedSkill(
+  name: unknown,
+  steps: unknown,
+): { name: string; steps: string } | { error: string } {
+  const n = String(name ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+  const s = String(steps ?? '').trim();
+  if (!n) return { error: 'name is required' };
+  if (s.length < 20) return { error: 'describe the steps (at least a few lines)' };
+  if (s.length > 20_000) return { error: 'keep a skill under 20,000 characters' };
+  return { name: n, steps: s };
+}
+
+export async function handleProposeSkill(content: Record<string, unknown>, session: Session): Promise<void> {
+  const checked = validateProposedSkill(content.name, content.steps);
+  const { notifyAgent } = await import('../approvals/index.js');
+  if ('error' in checked) {
+    notifyAgent(session, `propose_skill failed: ${checked.error}.`);
+    return;
+  }
+  if (fs.existsSync(path.join(installedSkillsDir(), checked.name))) {
+    notifyAgent(session, `propose_skill failed: a skill named "${checked.name}" already exists.`);
+    return;
+  }
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-skill-local-'));
+  const description = String(content.description ?? '').slice(0, 200);
+  fs.writeFileSync(
+    path.join(staging, 'SKILL.md'),
+    `---\nname: ${checked.name}\ndescription: ${description || checked.name}\n---\n\n${checked.steps}\n`,
+  );
+  fs.writeFileSync(
+    path.join(staging, 'instructions.md'),
+    `Saved procedure **${checked.name}**${description ? ` (${description})` : ''}: when this task comes up, follow /app/skills-installed/${checked.name}/SKILL.md.`,
+  );
+  const scan = scanSkill(staging);
+  const warnings = scan.warnings.length
+    ? `\n⚠️ Warnings:\n${scan.warnings.map((w) => `• ${w.file} ${w.why}`).join('\n')}`
+    : '';
+  await requestApproval({
+    session,
+    agentName: session.agent_group_id,
+    action: 'skill_install',
+    payload: {
+      stagingDir: staging,
+      name: checked.name,
+      ref: { repo: 'local', sha: 'recorded', dir: '' },
+      digest: digestOf(scan),
+    },
+    title: `Save "${checked.name}" as a skill?`,
+    question: `The agent wants to remember this procedure for next time:\n\n${checked.steps.slice(0, 1200)}${checked.steps.length > 1200 ? '\n…' : ''}${warnings}`,
+    risk: scan.warnings.length ? 'high' : 'low',
+  });
+}
+
+registerDeliveryAction('propose_skill', handleProposeSkill);

@@ -23,8 +23,10 @@ vi.mock('../approvals/index.js', () => ({
     return true;
   },
   registerApprovalHandler: (name: string, h: (ctx: Record<string, unknown>) => Promise<void>) => handlers.set(name, h),
+  notifyAgent: vi.fn(),
 }));
 vi.mock('../permissions/db/user-roles.js', () => ({ hasAdminPrivilege: (u: string) => u === 'slack:ADMIN' }));
+vi.mock('../../delivery.js', () => ({ registerDeliveryAction: vi.fn() }));
 
 import type { Session } from '../../types.js';
 import { defaultCheckout, listInstalled, parseSkillRef, scanSkill, skillsCommand } from './index.js';
@@ -133,5 +135,32 @@ describe('skills library', () => {
     expect(String(approvals[1].question)).toMatch(/0 added, 1 changed, 0 removed \(notes\.md\)/);
     expect(await skillsCommand({ session, userId: 'slack:ADMIN', args: 'remove a', checkout })).toMatch(/Removed a/);
     expect(listInstalled()).toHaveLength(0);
+  });
+});
+
+describe('record-to-skill', () => {
+  it('turns a proposed procedure into a reviewed, low-risk skill install', async () => {
+    const { handleProposeSkill, listInstalled: list } = await import('./index.js');
+    approvals.length = 0;
+    tmp.data = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-skilldata-'));
+    await handleProposeSkill(
+      {
+        action: 'propose_skill',
+        name: 'Supplier Invoice Download',
+        description: 'Monthly invoice',
+        steps: '1. Open https://portal.test\n2. Hand off for sign-in\n3. Download the PDF',
+      },
+      session,
+    );
+    expect(approvals[0]).toMatchObject({
+      action: 'skill_install',
+      risk: 'low',
+      title: 'Save "supplier-invoice-download" as a skill?',
+    });
+    await handlers.get('skill_install')!({ payload: approvals[0].payload, userId: 'slack:ADMIN', notify: vi.fn() });
+    expect(list().map((i) => i.name)).toEqual(['supplier-invoice-download']);
+    expect(fs.readFileSync(path.join(tmp.data, 'skills', 'supplier-invoice-download', 'SKILL.md'), 'utf8')).toContain(
+      'Download the PDF',
+    );
   });
 });
