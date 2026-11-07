@@ -105,6 +105,31 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/model': {
+        const { PRESETS, PRESET_TEXT, defaultPreset, getSessionPreset, parsePreset, setSessionPreset } =
+          await import('../../model-presets.js');
+        const want = ctx.args.trim();
+        const current = getSessionPreset(ctx.session.id) ?? defaultPreset();
+        if (!want) {
+          write(
+            [
+              `**Thinking level here:** ${PRESET_TEXT[current]}`,
+              ...PRESETS.map((p) => `• /model ${p} — ${PRESET_TEXT[p]}`),
+              'Shortcuts: !fast, !deep, !normal',
+            ].join('\n'),
+          );
+          return;
+        }
+        const preset = parsePreset(want);
+        if (!preset) {
+          write('Use /model fast, /model balanced or /model best.');
+          return;
+        }
+        setSessionPreset(ctx.session.id, preset);
+        if (isContainerRunning(ctx.session.id)) killContainer(ctx.session.id, `model preset changed to ${preset}`);
+        write(`${PRESET_TEXT[preset]}. I'll use it from your next message.`);
+        return;
+      }
       case '/memory': {
         const { memoryCommand } = await import('./memory-cmd.js');
         write(

@@ -302,6 +302,8 @@ export class ClaudeProvider implements AgentProvider {
       prompt: stream,
       options: {
         cwd: input.cwd,
+        // Model from the host's preset (fast / balanced / best); unset = Claude Code's default.
+        ...(process.env.CLAWBRIDGE_MODEL ? { model: process.env.CLAWBRIDGE_MODEL } : {}),
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
         // pathToClaudeCodeExecutable: SDK resolves claude via $PATH (PNPM_HOME/bin on PATH in image)

@@ -45,6 +45,7 @@ import {
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
 import { revokeSessionCredentials } from './credential-proxy.js';
+import { modelEnv } from './model-presets.js';
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -129,7 +130,15 @@ async function spawnContainer(session: Session): Promise<void> {
 
   const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
   const containerName = `clawbridge-v2-${agentGroup.folder}-${Date.now()}`;
-  const args = await buildContainerArgs(mounts, containerName, agentGroup, containerConfig, provider, contribution);
+  const args = await buildContainerArgs(
+    mounts,
+    containerName,
+    agentGroup,
+    containerConfig,
+    provider,
+    contribution,
+    session.id,
+  );
 
   // Stop any stale containers for this group before spawning a new one.
   // This catches both named containers from previous runs (clawbridge-v2-<folder>-*)
@@ -523,6 +532,7 @@ async function buildContainerArgs(
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
+  sessionId?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
@@ -534,6 +544,11 @@ async function buildContainerArgs(
   // The runner prefers this over container.json so per-session overrides
   // actually take effect.
   args.push('-e', `CLAWBRIDGE_PROVIDER=${provider}`);
+
+  // Model preset for this conversation (fast / balanced / best).
+  if (sessionId) {
+    for (const [key, value] of Object.entries(modelEnv(sessionId, provider))) args.push('-e', `${key}=${value}`);
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {

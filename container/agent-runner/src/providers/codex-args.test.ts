@@ -28,3 +28,17 @@ describe('codex exec arguments', () => {
     expect(args.some((a) => a.startsWith('mcp_servers.clawbridge.'))).toBe(true);
   });
 });
+
+describe('codex model preset args', () => {
+  it('adds -m and reasoning effort from the host preset, and nothing when unset', async () => {
+    const { buildInitialArgs, modelArgs } = await import('./codex.js');
+    expect(modelArgs({ CLAWBRIDGE_MODEL: 'gpt-5.4-mini', CLAWBRIDGE_EFFORT: 'low' })).toEqual([
+      '-m',
+      'gpt-5.4-mini',
+      '-c',
+      'model_reasoning_effort="low"',
+    ]);
+    expect(modelArgs({ CLAWBRIDGE_MODEL: 'bad model; rm -rf /' })).toEqual([]);
+    expect(buildInitialArgs('/w', {}, {})).not.toContain('-m');
+  });
+});

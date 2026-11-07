@@ -24,7 +24,7 @@ export interface ControlInput {
   isGroup: boolean;
 }
 
-const CONTROL = /^!(stop|mute|unmute)\b\s*(.*)$/i;
+const CONTROL = /^!(stop|mute|unmute|fast|deep|normal)\b\s*(.*)$/i;
 const DEFAULT_MUTE_HOURS = 8;
 
 export function isChatControl(text: string): boolean {
@@ -79,6 +79,11 @@ export async function handleChatControl(input: ControlInput): Promise<string | n
   const cmd = m[1].toLowerCase();
   const arg = m[2].trim();
 
+  if (cmd === 'fast' || cmd === 'deep' || cmd === 'normal') {
+    const preset = cmd === 'fast' ? 'fast' : cmd === 'deep' ? 'best' : 'balanced';
+    return applyPresetToChat(input, preset);
+  }
+
   if (cmd === 'stop') {
     const stopped = await stopChatSession(
       input.channelType,
@@ -119,4 +124,25 @@ export async function handleChatControl(input: ControlInput): Promise<string | n
   });
   log.info('Chat muted', { channelType: input.channelType, platformId: input.platformId, hours });
   return `Okay, I'll stay quiet here ${humanUntil(until)}. Send !unmute to bring me back.`;
+}
+
+/** Switch the model preset for the conversation in this chat; takes effect on the next message. */
+async function applyPresetToChat(input: ControlInput, preset: 'fast' | 'balanced' | 'best'): Promise<string> {
+  const mg = getMessagingGroupByPlatform(input.channelType, input.platformId);
+  const { findSession } = await import('./db/sessions.js');
+  const session = mg
+    ? ((input.threadId ? findSession(mg.id, input.threadId) : undefined) ?? findSession(mg.id, null))
+    : undefined;
+  if (!session) return 'Send me a message first, then pick how I should think.';
+  const { PRESET_TEXT, setSessionPreset } = await import('./model-presets.js');
+  setSessionPreset(session.id, preset);
+  const { isContainerRunning, killContainer } = await import('./container-runner.js');
+  if (isContainerRunning(session.id)) killContainer(session.id, `model preset changed to ${preset}`);
+  audit('model.preset', {
+    actor: input.senderId,
+    target: session.id,
+    channelType: input.channelType,
+    detail: { preset },
+  });
+  return `${PRESET_TEXT[preset]}. I'll use it from your next message.`;
 }

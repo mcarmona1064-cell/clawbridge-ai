@@ -66,7 +66,11 @@ function mcpServerArgs(servers: Record<string, McpServerConfig>): string[] {
   return out;
 }
 
-export function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServerConfig>): string[] {
+export function buildInitialArgs(
+  cwd: string,
+  mcpServers: Record<string, McpServerConfig>,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
   return [
     'exec',
     '--json',
@@ -75,8 +79,19 @@ export function buildInitialArgs(cwd: string, mcpServers: Record<string, McpServ
     '--skip-git-repo-check',
     '-C',
     cwd,
+    ...modelArgs(env),
     ...mcpServerArgs(mcpServers),
   ];
+}
+
+/** Model and reasoning effort from the host's preset (fast / balanced / best). */
+export function modelArgs(env: Record<string, string | undefined>): string[] {
+  const out: string[] = [];
+  if (env.CLAWBRIDGE_MODEL && /^[\w.:-]+$/.test(env.CLAWBRIDGE_MODEL)) out.push('-m', env.CLAWBRIDGE_MODEL);
+  if (env.CLAWBRIDGE_EFFORT && /^(minimal|low|medium|high|xhigh)$/.test(env.CLAWBRIDGE_EFFORT)) {
+    out.push('-c', `model_reasoning_effort="${env.CLAWBRIDGE_EFFORT}"`);
+  }
+  return out;
 }
 
 /**
