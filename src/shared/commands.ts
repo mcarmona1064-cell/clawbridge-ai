@@ -53,6 +53,20 @@ const DEFINITIONS: SlashCommandDefinition[] = [
     description: 'Show or switch the AI provider (/provider claude|codex [session] or /provider default)',
   },
   {
+    command: '/link',
+    category: 'host',
+    adminOnly: false,
+    description: 'Link this account to your account on another channel (/link, then /link <code> there)',
+  },
+  { command: '/unlink', category: 'host', adminOnly: false, description: 'Unlink this account (/unlink [account])' },
+  { command: '/accounts', category: 'host', adminOnly: false, description: 'List the accounts linked to you' },
+  {
+    command: '/notify-here',
+    category: 'host',
+    adminOnly: false,
+    description: 'Send your approvals and alerts to this chat',
+  },
+  {
     command: '/health',
     category: 'host',
     adminOnly: false,

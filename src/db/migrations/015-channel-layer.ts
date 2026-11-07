@@ -42,6 +42,8 @@ export const migration015: Migration = {
         created_at  TEXT NOT NULL,
         expires_at  TEXT NOT NULL,
         redeemed_by TEXT,
+        redeemed_channel_type TEXT,
+        redeemed_platform_id  TEXT,
         status      TEXT NOT NULL DEFAULT 'open'
       );
 

@@ -1,5 +1,6 @@
 import type { UserRole, UserRoleKind } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { identityClause } from '../../../db/user-links.js';
 
 /**
  * Grant a role. Owner rows must have agent_group_id = null (enforced here,
@@ -30,27 +31,36 @@ export function revokeRole(userId: string, role: UserRoleKind, agentGroupId: str
 }
 
 export function getUserRoles(userId: string): UserRole[] {
-  return getDb().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(userId) as UserRole[];
+  const who = identityClause(userId);
+  return getDb()
+    .prepare(`SELECT * FROM user_roles WHERE ${who.sql}`)
+    .all(...who.params) as UserRole[];
 }
 
+// Role checks resolve through linked accounts: a person who is owner on
+// Slack is owner from their linked WhatsApp too (see db/user-links.ts).
+
 export function isOwner(userId: string): boolean {
+  const who = identityClause(userId);
   const row = getDb()
-    .prepare('SELECT 1 FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id IS NULL LIMIT 1')
-    .get(userId, 'owner');
+    .prepare(`SELECT 1 FROM user_roles WHERE ${who.sql} AND role = ? AND agent_group_id IS NULL LIMIT 1`)
+    .get(...who.params, 'owner');
   return !!row;
 }
 
 export function isGlobalAdmin(userId: string): boolean {
+  const who = identityClause(userId);
   const row = getDb()
-    .prepare('SELECT 1 FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id IS NULL LIMIT 1')
-    .get(userId, 'admin');
+    .prepare(`SELECT 1 FROM user_roles WHERE ${who.sql} AND role = ? AND agent_group_id IS NULL LIMIT 1`)
+    .get(...who.params, 'admin');
   return !!row;
 }
 
 export function isAdminOfAgentGroup(userId: string, agentGroupId: string): boolean {
+  const who = identityClause(userId);
   const row = getDb()
-    .prepare('SELECT 1 FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id = ? LIMIT 1')
-    .get(userId, 'admin', agentGroupId);
+    .prepare(`SELECT 1 FROM user_roles WHERE ${who.sql} AND role = ? AND agent_group_id = ? LIMIT 1`)
+    .get(...who.params, 'admin', agentGroupId);
   return !!row;
 }
 

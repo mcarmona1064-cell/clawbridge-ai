@@ -65,6 +65,23 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return handleProvider(ctx, write);
       case '/teamfact':
         return await handleTeamFact(ctx, write);
+      case '/link':
+      case '/unlink':
+      case '/accounts':
+      case '/notify-here': {
+        const { handleIdentityCommand } = await import('../identity/index.js');
+        const reply = await handleIdentityCommand({
+          channelType: ctx.event.channelType,
+          platformId: ctx.event.platformId,
+          threadId: ctx.event.threadId,
+          text: `${ctx.command} ${ctx.args}`.trim(),
+          senderId: ctx.userId,
+          senderName: null,
+          isGroup: ctx.mg.is_group === 1,
+        });
+        if (reply) write(reply);
+        return;
+      }
       default:
         write('Unknown host command: ' + ctx.command);
     }

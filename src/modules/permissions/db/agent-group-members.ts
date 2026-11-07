@@ -1,5 +1,6 @@
 import type { AgentGroupMember } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { identityClause } from '../../../db/user-links.js';
 import { isAdminOfAgentGroup, isGlobalAdmin, isOwner } from './user-roles.js';
 
 export function addMember(row: AgentGroupMember): void {
@@ -29,9 +30,10 @@ export function isMember(userId: string, agentGroupId: string): boolean {
   if (isOwner(userId) || isGlobalAdmin(userId) || isAdminOfAgentGroup(userId, agentGroupId)) {
     return true;
   }
+  const who = identityClause(userId);
   const row = getDb()
-    .prepare('SELECT 1 FROM agent_group_members WHERE user_id = ? AND agent_group_id = ? LIMIT 1')
-    .get(userId, agentGroupId);
+    .prepare(`SELECT 1 FROM agent_group_members WHERE ${who.sql} AND agent_group_id = ? LIMIT 1`)
+    .get(...who.params, agentGroupId);
   return !!row;
 }
 

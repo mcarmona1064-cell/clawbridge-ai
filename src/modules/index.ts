@@ -23,4 +23,5 @@ import './permissions/index.js';
 import './agent-to-agent/index.js';
 import './self-mod/index.js';
 import './team-memory/index.js';
+import './identity/index.js';
 import './host-commands/index.js';

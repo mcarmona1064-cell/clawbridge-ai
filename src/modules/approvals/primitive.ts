@@ -23,6 +23,7 @@
  */
 import { cardTtlMs, normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
+import { identityIds, notifyUserIdFor } from '../../db/user-links.js';
 import { createPendingApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -116,16 +117,43 @@ export async function pickApprovalDelivery(
   approvers: string[],
   originChannelType: string,
 ): Promise<{ userId: string; messagingGroup: MessagingGroup } | null> {
-  if (originChannelType) {
-    for (const userId of approvers) {
-      if (channelTypeOf(userId) !== originChannelType) continue;
-      const mg = await ensureUserDm(userId);
-      if (mg) return { userId, messagingGroup: mg };
+  // Each approver may have several linked accounts and a chosen channel
+  // for approvals (/notify-here). Try, in order: every approver's chosen
+  // channel; then accounts on the origin's channel kind; then the rest.
+  const accountsOf = (approver: string): string[] => {
+    const ids = identityIds(approver);
+    const preferred = notifyUserIdFor(approver);
+    return preferred ? [preferred, ...ids.filter((id) => id !== preferred)] : ids;
+  };
+  const tried = new Set<string>();
+  const attempt = async (userId: string) => {
+    if (tried.has(userId)) return null;
+    tried.add(userId);
+    const mg = await ensureUserDm(userId);
+    return mg ? { userId, messagingGroup: mg } : null;
+  };
+
+  for (const approver of approvers) {
+    const preferred = notifyUserIdFor(approver);
+    if (preferred) {
+      const hit = await attempt(preferred);
+      if (hit) return hit;
     }
   }
-  for (const userId of approvers) {
-    const mg = await ensureUserDm(userId);
-    if (mg) return { userId, messagingGroup: mg };
+  if (originChannelType) {
+    for (const approver of approvers) {
+      for (const userId of accountsOf(approver)) {
+        if (channelTypeOf(userId) !== originChannelType) continue;
+        const hit = await attempt(userId);
+        if (hit) return hit;
+      }
+    }
+  }
+  for (const approver of approvers) {
+    for (const userId of accountsOf(approver)) {
+      const hit = await attempt(userId);
+      if (hit) return hit;
+    }
   }
   return null;
 }

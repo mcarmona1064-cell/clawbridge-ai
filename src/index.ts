@@ -19,6 +19,7 @@ import { initErrorHandler } from './error-handler.js';
 import { startHealthCheck, stopHealthCheck } from './health-check.js';
 import { routeInbound } from './router.js';
 import { interceptNumberedReply, prepareOutbound } from './channels/channel-layer.js';
+import { handleIdentityCommand, isIdentityCommand } from './modules/identity/index.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
 
@@ -115,9 +116,38 @@ async function main(): Promise<void> {
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
     return {
       onInbound(platformId, threadId, message) {
+        const inboundContent = (message.content ?? {}) as { text?: unknown; senderId?: unknown; sender?: unknown };
+
+        // Account-linking commands work on any channel, before access checks:
+        // a new account must be able to link itself to an existing one.
+        if (typeof inboundContent.text === 'string' && isIdentityCommand(inboundContent.text)) {
+          const text = inboundContent.text;
+          void handleIdentityCommand({
+            channelType: adapter.channelType,
+            platformId,
+            threadId,
+            text,
+            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            senderName: typeof inboundContent.sender === 'string' ? inboundContent.sender : null,
+            isGroup: message.isGroup === true,
+          })
+            .then((reply) =>
+              reply
+                ? deliveryAdapter.deliver(
+                    adapter.channelType,
+                    platformId,
+                    threadId,
+                    'chat',
+                    JSON.stringify({ text: reply }),
+                  )
+                : undefined,
+            )
+            .catch((err) => log.error('Identity command failed', { err }));
+          return;
+        }
+
         // A reply of "2" to a numbered question card answers the card (same
         // path as a button click) instead of reaching the agent.
-        const inboundContent = (message.content ?? {}) as { text?: unknown; senderId?: unknown };
         const answer =
           typeof inboundContent.text === 'string'
             ? interceptNumberedReply(adapter.channelType, platformId, threadId, inboundContent.text)

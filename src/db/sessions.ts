@@ -243,7 +243,23 @@ export function getAskQuestionRender(
     if (s?.title) return { title: s.title, options: JSON.parse(s.options_json) };
   }
 
+  for (const provider of renderProviders) {
+    const r = provider(id);
+    if (r) return r;
+  }
+
   return undefined;
+}
+
+type QuestionRender = { title: string; options: import('../channels/ask-question.js').NormalizedOption[] };
+const renderProviders: Array<(id: string) => QuestionRender | undefined> = [];
+
+/**
+ * Let a module that sends its own cards (e.g. account-link confirmations)
+ * resolve them, so clicks map back to option values on every channel.
+ */
+export function registerAskQuestionRender(provider: (id: string) => QuestionRender | undefined): void {
+  renderProviders.push(provider);
 }
 
 export function getPendingApprovalsByDeliveryChannel(channelType: string, platformId: string): PendingApproval[] {
