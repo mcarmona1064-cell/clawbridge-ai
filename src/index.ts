@@ -346,6 +346,16 @@ async function main(): Promise<void> {
     );
   }
 
+  // 5c. Local admin console (token-protected, read-only).
+  {
+    const { startAdminConsole } = await import('./admin-console.js');
+    try {
+      startAdminConsole();
+    } catch (err) {
+      log.warn('Admin console not started', { err });
+    }
+  }
+
   // 6. Start host sweep
   startHostSweep();
   log.info('Host sweep started');

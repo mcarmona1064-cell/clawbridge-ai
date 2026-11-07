@@ -59,6 +59,12 @@ if (process.argv[2] === 'chat') {
   process.exit(0);
 }
 
+if (process.argv[2] === 'console') {
+  const { consoleUrl } = await import('../admin-console.js');
+  console.log(`Admin console (keep this link private): ${consoleUrl()}`);
+  process.exit(0);
+}
+
 if (process.argv[2] === 'tunnel') {
   const { runTunnel } = await import('../tunnel.js');
   process.exit(await runTunnel());
