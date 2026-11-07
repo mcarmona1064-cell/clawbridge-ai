@@ -34,6 +34,7 @@ import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh } from './modules/typing/index.js';
 import { acknowledgeInbound } from './ack.js';
 import { engageReason, recordEngageDecision } from './engage-log.js';
+import { overBudget } from './usage.js';
 import { log } from './log.js';
 import { resolveSession, sessionDir, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -592,6 +593,23 @@ async function deliverToAgent(
     }
   }
 
+  // Monthly budget reached: keep the message queued (no wake) and tell the chat once an hour.
+  if (wake && overBudget(agent.agent_group_id)) {
+    wake = false;
+    if (shouldNoticeBudget(agent.agent_group_id, mg.id)) {
+      writeOutboundDirect(session.agent_group_id, session.id, {
+        id: `budget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'chat',
+        platformId: deliveryAddr.platformId,
+        channelType: deliveryAddr.channelType,
+        threadId: deliveryAddr.threadId,
+        content: JSON.stringify({
+          text: "I've reached this month's usage budget, so I'm holding new messages. An admin can raise it with /budget — I'll pick them up after that.",
+        }),
+      });
+    }
+  }
+
   writeSessionMessage(session.agent_group_id, session.id, {
     id: messageIdForAgent(event.message.id, agent.agent_group_id),
     kind: event.message.kind,
@@ -695,4 +713,13 @@ function inheritWirings(fromMgId: string, toMgId: string): number {
     });
   }
   return wirings.length;
+}
+
+const budgetNotices = new Map<string, number>();
+function shouldNoticeBudget(agentGroupId: string, mgId: string): boolean {
+  const key = `${agentGroupId}:${mgId}`;
+  const last = budgetNotices.get(key) ?? 0;
+  if (Date.now() - last < 60 * 60 * 1000) return false;
+  budgetNotices.set(key, Date.now());
+  return true;
 }

@@ -24,6 +24,7 @@ import { migration017 } from './017-contact-state.js';
 import { migration018 } from './018-chat-mutes.js';
 import { migration019 } from './019-onboarding.js';
 import { migration020 } from './020-engage-log.js';
+import { migration021 } from './021-usage.js';
 
 export interface Migration {
   version: number;
@@ -55,6 +56,7 @@ const migrations: Migration[] = [
   migration018,
   migration019,
   migration020,
+  migration021,
 ];
 
 export function runMigrations(db: Database.Database): void {

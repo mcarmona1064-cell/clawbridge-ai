@@ -25,4 +25,5 @@ import './self-mod/index.js';
 import './team-memory/index.js';
 import './identity/index.js';
 import './onboarding/index.js';
+import './usage/index.js';
 import './host-commands/index.js';

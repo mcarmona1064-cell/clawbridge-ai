@@ -69,9 +69,20 @@ export interface AgentQuery {
   abort(): void;
 }
 
+/** Tokens one turn used, reported by the provider. */
+export interface TurnUsage {
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Provider's own estimate in USD (API-equivalent; subscriptions are not billed per token). */
+  costUsd?: number;
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
-  | { type: 'result'; text: string | null }
+  | { type: 'result'; text: string | null; usage?: TurnUsage }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; message: string }
   /**

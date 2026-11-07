@@ -105,6 +105,16 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/usage': {
+        const { usageCommand } = await import('../usage/index.js');
+        write(usageCommand(ctx.agentGroup.id));
+        return;
+      }
+      case '/budget': {
+        const { budgetCommand } = await import('../usage/index.js');
+        write(budgetCommand(ctx.agentGroup.id, ctx.userId, ctx.args));
+        return;
+      }
       case '/why': {
         const { whyText } = await import('../../engage-log.js');
         write(whyText(ctx.event.channelType, ctx.event.platformId));

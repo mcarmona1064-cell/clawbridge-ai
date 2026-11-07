@@ -21,6 +21,7 @@ import type {
   ProviderEvent,
   ProviderOptions,
   QueryInput,
+  TurnUsage,
 } from './types.js';
 
 function log(msg: string): void {
@@ -204,7 +205,7 @@ export class CodexProvider implements AgentProvider {
             }
             case 'turn.completed': {
               turnDone = true;
-              yield { type: 'result', text: collectedText || null };
+              yield { type: 'result', text: collectedText || null, usage: codexUsage(evt) };
               break;
             }
             case 'error':
@@ -310,3 +311,16 @@ async function* lineIterator(proc: ChildProcess, isAborted: () => boolean): Asyn
 }
 
 registerProvider('codex', (opts) => new CodexProvider(opts));
+
+/** Token usage from a Codex `turn.completed` event. */
+export function codexUsage(evt: unknown): TurnUsage | undefined {
+  const u = (evt as { usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } }).usage;
+  if (!u) return undefined;
+  const cached = u.cached_input_tokens ?? 0;
+  return {
+    inputTokens: Math.max(0, (u.input_tokens ?? 0) - cached),
+    outputTokens: u.output_tokens ?? 0,
+    cacheReadTokens: cached,
+    cacheWriteTokens: 0,
+  };
+}

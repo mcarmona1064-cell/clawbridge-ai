@@ -13,6 +13,7 @@ import type {
   ProviderEvent,
   ProviderOptions,
   QueryInput,
+  TurnUsage,
 } from './types.js';
 
 function log(msg: string): void {
@@ -338,7 +339,7 @@ export class ClaudeProvider implements AgentProvider {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'result') {
           const text = 'result' in message ? ((message as { result?: string }).result ?? null) : null;
-          yield { type: 'result', text };
+          yield { type: 'result', text, usage: claudeUsage(message) };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
           yield { type: 'error', message: 'API retry', retryable: true };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'rate_limit_event') {
@@ -368,3 +369,26 @@ export class ClaudeProvider implements AgentProvider {
 }
 
 registerProvider('claude', (opts) => new ClaudeProvider(opts));
+
+/** Token usage from a Claude Agent SDK `result` message. */
+export function claudeUsage(message: unknown): TurnUsage | undefined {
+  const m = message as {
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
+    total_cost_usd?: number;
+    modelUsage?: Record<string, unknown>;
+  };
+  if (!m.usage) return undefined;
+  return {
+    model: m.modelUsage ? Object.keys(m.modelUsage)[0] : undefined,
+    inputTokens: m.usage.input_tokens ?? 0,
+    outputTokens: m.usage.output_tokens ?? 0,
+    cacheReadTokens: m.usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: m.usage.cache_creation_input_tokens ?? 0,
+    costUsd: typeof m.total_cost_usd === 'number' ? m.total_cost_usd : undefined,
+  };
+}
