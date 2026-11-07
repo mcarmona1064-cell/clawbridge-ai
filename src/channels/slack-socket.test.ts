@@ -16,7 +16,7 @@ class FakeSocket implements SocketLike {
     this.closed = true;
     this.emit('close');
   }
-  addEventListener(type: string, fn: (ev?: never) => void) {
+  addEventListener(type: string, fn: (ev: { data: unknown }) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn as (ev?: unknown) => void]);
   }
   emit(type: string, data?: unknown) {

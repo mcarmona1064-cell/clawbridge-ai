@@ -60,7 +60,8 @@ Linking commands work before access checks, so a new account can link itself. Co
   - Set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to a **utility** template with one body variable, for example "Update from your assistant: {{1}}". Late messages, scheduled results and digests are then sent through it.
   - Without a template, a late send is refused with a clear error rather than failing at Meta.
   - When someone sends **STOP** (or unsubscribe, cancel, quit), nothing more is sent to them until they send **START**. Their messages don't reach the agent in the meantime. Opt-outs and blocked sends are recorded in the audit log.
-- **WhatsApp.** Uses the official Cloud API. Set `WHATSAPP_APP_SECRET` so forged webhooks are rejected; doctor flags it when it's missing. Webhooks are acknowledged at once and retries are dropped by message id. The unofficial WhatsApp Web route (Baileys) carries a real risk of the number being banned, and is not the default.
+- **WhatsApp.** Meta needs a public HTTPS callback URL. `clawbridge-ai tunnel` opens a Cloudflare quick tunnel and prints the exact URL to paste. Quick-tunnel URLs change on restart, so for a permanent URL point a named tunnel or reverse proxy at the webhook port (3000).
+- **WhatsApp API.** Uses the official Cloud API. Set `WHATSAPP_APP_SECRET` so forged webhooks are rejected; doctor flags it when it's missing. Webhooks are acknowledged at once and retries are dropped by message id. The unofficial WhatsApp Web route (Baileys) carries a real risk of the number being banned, and is not the default.
 - **Telegram.** No public URL needed. In groups, the bot sees every message only if group privacy mode is off (BotFather → `/setprivacy`). Otherwise it sees mentions and commands only.
 - **Discord.** No public URL needed. Turn on Message Content Intent. A mention in a server channel starts a thread under that message. Follow-ups in that thread reach the agent without another mention.
 
