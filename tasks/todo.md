@@ -23,32 +23,32 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Milestone 0: one channel layer
 
-- [ ] 0.1 **Capability model.** Add `src/channels/capabilities.ts` with `ChannelCapabilities`: threads, choices (buttons max, list max, label max), edit, reactions, typing, filesOut, voiceIn, maxText, format dialect, commands, home, openDM and replyWindowHours. `ChannelAdapter.capabilities?` holds the values, with `capabilitiesFor(channelType)` as the fallback. Features read capabilities, not channel names.
-- [ ] 0.2 **One renderer.** Add `src/channels/render.ts`: `toTelegramHtml`, `toWhatsApp`, `toDiscord`, `toPlain` and Slack passthrough, plus a shared `splitText(text, limit)` that never splits inside a code fence. Add a `planChoices(caps, options)` helper that returns buttons, list or numbered.
-- [ ] 0.3 **Choices on every channel.**
+- [x] 0.1 **Capability model.** Add `src/channels/capabilities.ts` with `ChannelCapabilities`: threads, choices (buttons max, list max, label max), edit, reactions, typing, filesOut, voiceIn, maxText, format dialect, commands, home, openDM and replyWindowHours. `ChannelAdapter.capabilities?` holds the values, with `capabilitiesFor(channelType)` as the fallback. Features read capabilities, not channel names.
+- [x] 0.2 **One renderer.** Add `src/channels/render.ts`: `toTelegramHtml`, `toWhatsApp`, `toDiscord`, `toPlain` and Slack passthrough, plus a shared `splitText(text, limit)` that never splits inside a code fence. Add a `planChoices(caps, options)` helper that returns buttons, list or numbered.
+- [x] 0.3 **Choices on every channel.**
   - Telegram: inline keyboard plus `callback_query`, then `answerCallbackQuery` and an edit that removes the buttons.
   - WhatsApp: reply buttons (max 3, 20-character titles) or list (max 10), with inbound `interactive.button_reply` and `list_reply`.
   - Discord: button components plus InteractionCreate, then disable the buttons.
   - Plain channels: a numbered-reply fallback through a `numbered_prompts` table that the router intercepts.
   - All of them reuse `ncq:{questionId}:{idx}` and go through `onAction`, so the existing auth, expiry and records apply.
-- [ ] 0.4 **Question expiry.** `pending_questions` get the same TTL as approvals, and stale clicks are refused politely.
-- [ ] 0.5 **Cross-channel identity.**
+- [x] 0.4 **Question expiry.** `pending_questions` get the same TTL as approvals, and stale clicks are refused politely.
+- [x] 0.5 **Cross-channel identity.**
   - `user_links` (alias user id → primary user id) and `link_codes`.
   - `/link` in a DM issues a 6-digit code (10 minutes, single use).
   - `/link <code>` from the other account in a DM sends a confirm card to the first account. Linking only happens after that approval.
   - Roles, admin checks, approver picking and `/usage` resolve through the primary id.
   - `/unlink`.
-- [ ] 0.6 **Admin's channel.** `/notify-here` sets the approvals and alerts channel per user, and `pickApprovalDelivery` prefers it across linked accounts.
-- [ ] 0.7 **Adapter contract suite.** `src/channels/contract/` holds one spec run against a fake platform for Slack, Telegram, WhatsApp and Discord. It covers:
+- [x] 0.6 **Admin's channel.** `/notify-here` sets the approvals and alerts channel per user, and `pickApprovalDelivery` prefers it across linked accounts.
+- [x] 0.7 **Adapter contract suite.** `src/channels/contract/` holds one spec run against a fake platform for Slack, Telegram, WhatsApp and Discord. It covers:
   - sender identity, dedupe and retries, DM vs group, mention handling
   - choices and clicks
   - edit or its fallback, files in and out, voice transcription
   - long-message splitting, errors that throw, rate-limit backoff
-- [ ] 0.8 **Bring Telegram, WhatsApp and Discord to Slack's quality.**
+- [x] 0.8 **Bring Telegram, WhatsApp and Discord to Slack's quality.**
   - WhatsApp: signature check (`WHATSAPP_APP_SECRET`), senderId and name from `contacts`, dedupe, thrown errors, splitting, files out, read receipts as the ack.
   - Telegram: HTML formatting, splitting, edits, reactions, files out by type.
   - Discord: senderId and name, reply in the thread or reply-to, files out, edits, reactions.
-- [ ] 0.9 **Docs.** Add `docs/channels.md` with a capability matrix and the graceful fallbacks.
+- [x] 0.9 **Docs.** Add `docs/channels.md` with a capability matrix and the graceful fallbacks.
 
 ## Milestone 1: safety floor
 
@@ -115,4 +115,52 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Review
 
-(Filled in at the end of each milestone.)
+### Milestone 0 (pushed to `ai` main at 028c9aa, 2026-11-06)
+
+**What changed for users, by channel**
+
+- **Slack:** card bodies now render Markdown. Everything else was already in place.
+- **Telegram:**
+  - Approval and question cards are tappable buttons, and the card shows who chose what.
+  - Replies are formatted as Telegram HTML and split at 4,096 characters.
+  - New: edits, reactions, and files sent as photo, video, voice or document.
+- **WhatsApp:**
+  - Webhooks are signature-checked (`WHATSAPP_APP_SECRET`) and retries are dropped.
+  - Every message carries the sender's id and name, so approvals, roles and `/teamfact` now work on WhatsApp.
+  - Cards are reply buttons or lists, with WhatsApp formatting.
+  - Files, reactions, read receipts and typing work.
+  - Failures throw, so delivery retries them.
+- **Discord:**
+  - Sender id and name.
+  - A mention starts a thread, and follow-ups there need no mention.
+  - Cards are buttons; edits, reactions, files and typing work; DMs can be opened for approvals.
+- **Plain-text channels:** cards become numbered lists and a reply of "2" answers them.
+- **Every channel:**
+  - `/link` joins one person's accounts after the original account confirms.
+  - `/notify-here` picks where approvals arrive.
+  - Question cards expire like approvals.
+
+**Verified:**
+- 367 host tests pass, including the 50-check adapter contract suite, the identity tests and the channel-layer tests.
+- The agent-runner tests show 28 passing and the 6 known failures.
+
+**Not verified:**
+- Nothing has been tested against live Slack, WhatsApp, Telegram or Discord accounts.
+- Discord was tested against a fake client, not discord.js's real gateway.
+
+**Live checks, per channel**
+
+1. **Telegram.** DM the bot `/link`. Then send any message that triggers an approval (for example, ask the agent to save a team fact). Tap Approve, and the card should update with your name.
+2. **WhatsApp.**
+   - Set `WHATSAPP_APP_SECRET` and run `clawbridge-ai doctor`; it should pass.
+   - Send a voice note. It should be transcribed.
+   - Trigger an approval: you should get two reply buttons.
+3. **Discord.** @mention the bot in a channel. It should reply in a new thread. Then post a follow-up in that thread without a mention, and the bot should answer.
+4. **Cross-channel linking.**
+   - `/link` on Slack, then `/link <code>` on WhatsApp.
+   - Approve on Slack.
+   - `/accounts` on WhatsApp should list both accounts.
+   - `/notify-here` on WhatsApp, then trigger an approval from Slack: the card should arrive on WhatsApp.
+
+**Follow-ups found along the way:**
+- The WhatsApp setup step still installs the unofficial Baileys library. Switching setup to Cloud API by default belongs to M2 item 2.1.
