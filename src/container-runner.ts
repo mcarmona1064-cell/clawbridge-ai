@@ -46,6 +46,7 @@ import {
 import type { AgentGroup, Session } from './types.js';
 import { revokeSessionCredentials } from './credential-proxy.js';
 import { modelEnv } from './model-presets.js';
+import { installedSkillsDir } from './modules/skills/paths.js';
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -397,6 +398,10 @@ function buildMounts(
   if (fs.existsSync(skillsSrc)) {
     mounts.push({ hostPath: skillsSrc, containerPath: '/app/skills', readonly: true });
   }
+  // Skills installed with /skills install (pinned commits), read-only.
+  if (fs.existsSync(installedSkillsDir())) {
+    mounts.push({ hostPath: installedSkillsDir(), containerPath: '/app/skills-installed', readonly: true });
+  }
 
   // Additional mounts from container config
   if (containerConfig.additionalMounts && containerConfig.additionalMounts.length > 0) {
@@ -465,6 +470,13 @@ function syncSkillSymlinks(stateDir: string, containerConfig: import('./containe
     desired = containerConfig.skills;
   }
 
+  // Installed skills (pinned, admin-approved) are always offered.
+  const installed = fs.existsSync(installedSkillsDir())
+    ? fs
+        .readdirSync(installedSkillsDir())
+        .filter((e) => fs.existsSync(path.join(installedSkillsDir(), e, '.source.json')))
+    : [];
+  desired = [...desired, ...installed.filter((n) => !desired.includes(n))];
   const desiredSet = new Set(desired);
 
   // Remove symlinks not in the desired set
@@ -491,8 +503,19 @@ function syncSkillSymlinks(stateDir: string, containerConfig: import('./containe
     } catch {
       /* missing */
     }
+    const target = installed.includes(skill) ? `/app/skills-installed/${skill}` : `/app/skills/${skill}`;
+    if (exists) {
+      try {
+        if (fs.readlinkSync(linkPath) !== target) {
+          fs.unlinkSync(linkPath);
+          exists = false;
+        }
+      } catch {
+        /* not a symlink; leave it */
+      }
+    }
     if (!exists) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
+      fs.symlinkSync(target, linkPath);
     }
   }
 }

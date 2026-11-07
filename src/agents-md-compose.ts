@@ -24,6 +24,7 @@ import path from 'path';
 import { GROUPS_DIR } from './config.js';
 import { readContainerConfig } from './container-config.js';
 import { log } from './log.js';
+import { installedSkillsDir } from './modules/skills/paths.js';
 import type { AgentGroup } from './types.js';
 
 const MCP_TOOLS_HOST_SUBPATH = path.join('container', 'agent-runner', 'src', 'mcp-tools');
@@ -73,6 +74,17 @@ export function composeGroupAgentsMd(group: AgentGroup): void {
           title: `Skill: ${skillName}`,
           content: fs.readFileSync(hostFragment, 'utf8').trim(),
         });
+      }
+    }
+  }
+
+  // 2b. Installed skills (pinned, admin-approved via /skills install).
+  const installedDir = installedSkillsDir();
+  if (fs.existsSync(installedDir)) {
+    for (const skillName of fs.readdirSync(installedDir).sort()) {
+      const fragment = path.join(installedDir, skillName, 'instructions.md');
+      if (fs.existsSync(path.join(installedDir, skillName, '.source.json')) && fs.existsSync(fragment)) {
+        fragments.push({ title: `Skill: ${skillName}`, content: fs.readFileSync(fragment, 'utf8').trim() });
       }
     }
   }

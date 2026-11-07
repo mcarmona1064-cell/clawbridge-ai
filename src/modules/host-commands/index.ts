@@ -105,6 +105,11 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/skills': {
+        const { skillsCommand } = await import('../skills/index.js');
+        write(await skillsCommand({ session: ctx.session, userId: ctx.userId, args: ctx.args }));
+        return;
+      }
       case '/digest': {
         const { digestCommand } = await import('./digest-cmd.js');
         write(
