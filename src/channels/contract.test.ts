@@ -830,3 +830,60 @@ describe('whatsapp cards', () => {
     await h.teardown();
   });
 });
+
+// ── Chat SDK bridge (Teams, Google Chat, Webex, Matrix and other skill-installed channels) ──
+
+describe('chat-sdk bridge outbound contract', () => {
+  async function bridge(failNext = false) {
+    const { createChatSdkBridge } = await import('./chat-sdk-bridge.js');
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    let fail = failNext;
+    const adapter = {
+      name: 'teams',
+      postMessage: async (...args: unknown[]) => {
+        if (fail) {
+          fail = false;
+          throw new Error('403 Forbidden');
+        }
+        calls.push({ op: 'post', args });
+        return { id: `m${calls.length}` };
+      },
+      editMessage: async (...args: unknown[]) => void calls.push({ op: 'edit', args }),
+      addReaction: async (...args: unknown[]) => void calls.push({ op: 'react', args }),
+      startTyping: async (...args: unknown[]) => void calls.push({ op: 'typing', args }),
+      channelIdFromThreadId: (t: string) => t,
+    };
+    const b = createChatSdkBridge({ adapter: adapter as never, supportsThreads: true, maxTextLength: 1000 });
+    return { b, calls };
+  }
+
+  it('renders question cards with the shared choice ids', async () => {
+    const { b, calls } = await bridge();
+    await b.deliver('teams:c1', 't1', card);
+    expect(JSON.stringify(calls[0].args[1])).toContain('ncq:q-1:0');
+    expect(JSON.stringify(calls[0].args[1])).toContain('ncq:q-1:1');
+  });
+
+  it('splits long text, applies edits and reactions, and attaches files', async () => {
+    const { b, calls } = await bridge();
+    await b.deliver('teams:c1', 't1', { kind: 'chat', content: { text: 'word '.repeat(600) } });
+    expect(calls.filter((c) => c.op === 'post').length).toBeGreaterThan(1);
+    await b.deliver('teams:c1', 't1', { kind: 'chat', content: { operation: 'edit', messageId: 'm1', text: 'v2' } });
+    await b.deliver('teams:c1', 't1', {
+      kind: 'chat',
+      content: { operation: 'reaction', messageId: 'm1', emoji: 'eyes' },
+    });
+    await b.deliver('teams:c1', 't1', {
+      kind: 'chat',
+      content: { text: 'report' },
+      files: [{ filename: 'r.pdf', data: Buffer.from('x') }],
+    });
+    expect(calls.map((c) => c.op)).toEqual(expect.arrayContaining(['edit', 'react']));
+    expect(JSON.stringify(calls.at(-1)?.args[1])).toContain('r.pdf');
+  });
+
+  it('throws when the platform rejects a send', async () => {
+    const { b } = await bridge(true);
+    await expect(b.deliver('teams:c1', 't1', { kind: 'chat', content: { text: 'hi' } })).rejects.toThrow('403');
+  });
+});

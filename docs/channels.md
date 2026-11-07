@@ -2,7 +2,12 @@
 
 ClawBridge AI runs the same agent on every channel. Each channel adapter declares what its platform can do (`src/channels/capabilities.ts`). Features read those capabilities instead of the channel's name, and where a platform lacks something there is a defined fallback, never a silent gap.
 
-First-class channels: **Slack, WhatsApp (Meta Cloud API), Telegram and Discord**. Each one passes the same adapter contract suite (`src/channels/contract.test.ts`). Teams, Google Chat, Signal, iMessage, Matrix and email are installed by skills and will join the suite one by one.
+**First-class channels:** Slack, WhatsApp (Meta Cloud API), Telegram and Discord. Each one passes the same adapter contract suite (`src/channels/contract.test.ts`).
+
+**Other channels:**
+- Teams, Google Chat, Webex and Matrix are installed by skills and run through the Chat SDK bridge. The bridge passes the outbound part of the suite (cards with the shared choice ids, splitting, edits, reactions, files, errors that throw), and each of these channels declares its capabilities: Teams, Google Chat and Webex get buttons.
+- Signal, iMessage and email are plain-text channels, so their cards fall back to numbered replies.
+- Live inbound checks for these channels are still to come.
 
 ## What each channel supports
 

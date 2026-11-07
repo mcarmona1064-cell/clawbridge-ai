@@ -119,7 +119,12 @@ async function main(): Promise<void> {
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
     return {
       onInbound(platformId, threadId, message) {
-        const inboundContent = (message.content ?? {}) as { text?: unknown; senderId?: unknown; sender?: unknown };
+        const inboundContent = (message.content ?? {}) as {
+          text?: unknown;
+          senderId?: unknown;
+          sender?: unknown;
+          author?: unknown;
+        };
 
         // /connect <channel>: guided channel setup from chat. Tokens typed during
         // the flow are handled here and never reach the agent or its memory.
@@ -129,14 +134,14 @@ async function main(): Promise<void> {
             channelType: adapter.channelType,
             platformId,
             text: inboundContent.text,
-            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            senderId: senderIdOf(adapter.channelType, inboundContent),
           })
         ) {
           void handleConnect({
             channelType: adapter.channelType,
             platformId,
             text: inboundContent.text,
-            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            senderId: senderIdOf(adapter.channelType, inboundContent),
             isGroup: message.isGroup === true,
             agentName: process.env.ASSISTANT_NAME || 'ClawBridge AI',
           })
@@ -162,7 +167,7 @@ async function main(): Promise<void> {
             platformId,
             threadId,
             text,
-            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            senderId: senderIdOf(adapter.channelType, inboundContent),
             senderName: typeof inboundContent.sender === 'string' ? inboundContent.sender : null,
             isGroup: message.isGroup === true,
           })
@@ -191,7 +196,7 @@ async function main(): Promise<void> {
           dispatchResponse({
             questionId: answer.questionId,
             value: answer.value,
-            userId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            userId: senderIdOf(adapter.channelType, inboundContent),
             channelType: adapter.channelType,
             platformId,
             threadId,
@@ -205,7 +210,7 @@ async function main(): Promise<void> {
             platformId,
             threadId,
             text: inboundContent.text,
-            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            senderId: senderIdOf(adapter.channelType, inboundContent),
             isGroup: message.isGroup === true,
           })
             .then((reply) =>
@@ -401,3 +406,16 @@ main().catch((err) => {
   log.fatal('Startup failed', { err });
   process.exit(1);
 });
+
+/**
+ * The sender's namespaced id (`<channel>:<id>`), the same way the router
+ * stores users: native adapters set `senderId`; Chat SDK bridges put the raw
+ * id under `author.userId`.
+ */
+function senderIdOf(channelType: string, content: { senderId?: unknown; author?: unknown }): string | null {
+  const author = content.author as { userId?: unknown } | undefined;
+  const raw =
+    typeof content.senderId === 'string' ? content.senderId : typeof author?.userId === 'string' ? author.userId : null;
+  if (!raw) return null;
+  return raw.includes(':') ? raw : `${channelType}:${raw}`;
+}
