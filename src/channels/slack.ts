@@ -283,9 +283,55 @@ function createAdapter(): ChannelAdapter | null {
     return { text, files };
   }
 
+  // ── Agent sessions (Slack's agent_view: status line and stop button) ──
+
+  /** Latest user message per DM, used as the session's thread root when the reply isn't threaded. */
+  const lastUserTs = new Map<string, string>();
+  /** Last status sent per session, so the typing heartbeat doesn't spam the API. */
+  const sessionStatus = new Map<string, { status: string; at: number }>();
+  /** Turned off for the process when the workspace doesn't support agent sessions. */
+  let agentSessions = true;
+  const PROCESSING_REFRESH_MS = 10 * 60 * 1000; // Slack drops 'processing' after 1 hour
+
+  async function setSessionStatus(
+    channelId: string,
+    threadTs: string | null,
+    status: 'processing' | 'active' | 'suspended',
+  ): Promise<void> {
+    if (!agentSessions) return;
+    const thread = threadTs ?? lastUserTs.get(channelId) ?? null;
+    if (!thread) return;
+    const key = `${channelId}:${thread}`;
+    const prev = sessionStatus.get(key);
+    if (prev?.status === status && (status !== 'processing' || Date.now() - prev.at < PROCESSING_REFRESH_MS)) return;
+    if (!prev && status !== 'processing') return; // nothing to clear
+    sessionStatus.set(key, { status, at: Date.now() });
+    try {
+      await api('agents.sessions.setStatus', { channel_id: channelId, thread_ts: thread, status });
+    } catch (err) {
+      const code = err instanceof SlackApiError ? err.slackError : '';
+      if (['feature_disabled', 'unknown_method', 'missing_scope', 'not_allowed_token_type'].includes(code)) {
+        agentSessions = false;
+        log.info('[slack] agent sessions unavailable in this workspace; status line off', { code });
+      } else {
+        log.debug('[slack] agents.sessions.setStatus failed', { status, code });
+      }
+    }
+  }
+
   /** Process one Events API event (after the HTTP ack). */
   async function handleEvent(event: Record<string, unknown>): Promise<void> {
     const type = event['type'] as string;
+    if (type === 'agent_session_stopped') {
+      const channelId = event['channel'] as string;
+      const threadTs = (event['thread_ts'] as string | undefined) ?? null;
+      const user = (event['user'] as string | undefined) ?? '';
+      // Slack doesn't clear the status itself after a stop.
+      await setSessionStatus(channelId, threadTs, 'active');
+      const lastTs = lastUserTs.get(channelId);
+      cfg?.onStop?.(namespacedPlatformId(CHANNEL_TYPE, channelId), threadTs === lastTs ? null : threadTs, user);
+      return;
+    }
     if (type !== 'message' && type !== 'app_mention') return;
     // File uploads arrive as message/file_share; skip edits, deletes, joins, etc.
     const subtype = event['subtype'] as string | undefined;
@@ -308,6 +354,8 @@ function createAdapter(): ChannelAdapter | null {
 
     const { text, files } = await downloadFiles((event['files'] as SlackFile[] | undefined) ?? [], rawText);
     if (!text && files.length === 0) return;
+
+    if (!isGroup) lastUserTs.set(channelId, ts);
 
     // A top-level @mention in a channel starts a thread under that message.
     const existingThread = (event['thread_ts'] as string | undefined) ?? null;
@@ -509,6 +557,8 @@ function createAdapter(): ChannelAdapter | null {
           ...thread,
           ...questionMessage(content.questionId as string, title, (content.question as string) ?? '', options),
         });
+        // Waiting on the person: show the session as blocked, not working.
+        await setSessionStatus(channelId, threadId, 'suspended');
         return res['ts'] as string | undefined;
       }
 
@@ -523,7 +573,16 @@ function createAdapter(): ChannelAdapter | null {
       if (message.files && message.files.length > 0) {
         await uploadFiles(channelId, threadId, message.files);
       }
+      await setSessionStatus(channelId, threadId, 'active');
       return firstTs;
+    },
+
+    /** The agent is working: Slack shows its status line (and stop button) for the session. */
+    async setTyping(platformId: string, threadId: string | null) {
+      const channelId = platformId.startsWith(`${CHANNEL_TYPE}:`)
+        ? platformId.slice(CHANNEL_TYPE.length + 1)
+        : platformId;
+      await setSessionStatus(channelId, threadId, 'processing');
     },
 
     async openDM(userHandle: string): Promise<string> {

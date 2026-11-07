@@ -203,6 +203,85 @@ describe('Slack adapter (end to end with a fake Slack)', () => {
   });
 });
 
+describe('Slack agent sessions', () => {
+  const posted: Array<{ method: string; body: Record<string, unknown> }> = [];
+  it('shows working while the agent runs, clears it on reply, and maps the stop button to onStop', async () => {
+    posted.length = 0;
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = url.replace('https://slack.com/api/', '');
+      posted.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      if (method === 'auth.test') return jsonResponse({ ok: true, user_id: 'UBOT' });
+      if (method === 'users.info') return jsonResponse({ ok: true, user: { profile: { display_name: 'Ana' } } });
+      return jsonResponse({ ok: true, ts: '9.9' });
+    });
+    const adapter = factories.get('slack')!.factory() as ChannelAdapter;
+    const onStop = vi.fn();
+    await adapter.setup({
+      onInbound: vi.fn(),
+      onAction: vi.fn(),
+      onMetadata: vi.fn(),
+      onStop,
+    } as unknown as ChannelSetup);
+
+    // A DM arrives; its ts is the session's root under agent_view.
+    await handlers.get('slack')!(
+      signed(
+        JSON.stringify({
+          type: 'event_callback',
+          event_id: 'EvS1',
+          event: { type: 'message', channel_type: 'im', channel: 'D7', user: 'U1', ts: '50.1', text: 'hi' },
+        }),
+      ),
+    );
+    await flush();
+    await flush();
+
+    await adapter.setTyping!('slack:D7', null);
+    await adapter.setTyping!('slack:D7', null); // heartbeat: no second call
+    const statuses = () => posted.filter((p) => p.method === 'agents.sessions.setStatus').map((p) => p.body);
+    expect(statuses()).toEqual([{ channel_id: 'D7', thread_ts: '50.1', status: 'processing' }]);
+
+    await adapter.deliver('slack:D7', null, { kind: 'chat', content: { text: 'Done.' } });
+    expect(statuses().at(-1)).toMatchObject({ status: 'active' });
+
+    await handlers.get('slack')!(
+      signed(
+        JSON.stringify({
+          type: 'event_callback',
+          event_id: 'EvS2',
+          event: {
+            type: 'agent_session_stopped',
+            channel: 'D7',
+            thread_ts: '50.1',
+            user: 'U1',
+            streaming_message_ts: [],
+          },
+        }),
+      ),
+    );
+    await flush();
+    await flush();
+    expect(onStop).toHaveBeenCalledWith('slack:D7', null, 'U1');
+  });
+
+  it('turns the status line off when the workspace has no agent sessions', async () => {
+    posted.length = 0;
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = url.replace('https://slack.com/api/', '');
+      posted.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      if (method === 'agents.sessions.setStatus') return jsonResponse({ ok: false, error: 'feature_disabled' });
+      return jsonResponse({ ok: true, ts: '1.1', user_id: 'UBOT' });
+    });
+    const adapter = factories.get('slack')!.factory() as ChannelAdapter;
+    await adapter.setup({ onInbound: vi.fn(), onAction: vi.fn(), onMetadata: vi.fn() } as unknown as ChannelSetup);
+    await adapter.setTyping!('slack:C1', '100.1');
+    await adapter.setTyping!('slack:C2', '200.1');
+    expect(posted.filter((p) => p.method === 'agents.sessions.setStatus')).toHaveLength(1);
+  });
+});
+
 describe('Slack app manifest', () => {
   it('requests exactly the scopes the adapter uses, plus its events and interactivity', async () => {
     const fs = await import('fs');

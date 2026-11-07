@@ -25,6 +25,12 @@ export interface ChannelSetup {
 
   /** Called when a user clicks a button/action in a card (e.g., ask_user_question response). */
   onAction(questionId: string, selectedOption: string, userId: string): void;
+
+  /**
+   * Called when a user asks the platform to stop the agent (e.g. Slack's
+   * native stop button). The host stops the running turn for that chat.
+   */
+  onStop?(platformId: string, threadId: string | null, userId: string): void;
 }
 
 /** Delivery address used for reply-to overrides and (normally) the inbound's own origin. */

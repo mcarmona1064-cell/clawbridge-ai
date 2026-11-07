@@ -20,6 +20,7 @@ import { startHealthCheck, stopHealthCheck } from './health-check.js';
 import { routeInbound } from './router.js';
 import { interceptNumberedReply, prepareOutbound } from './channels/channel-layer.js';
 import { handleIdentityCommand, isIdentityCommand } from './modules/identity/index.js';
+import { stopChatSession } from './stop-session.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
 
@@ -196,6 +197,11 @@ async function main(): Promise<void> {
           name,
           isGroup,
         });
+      },
+      onStop(platformId, threadId, userId) {
+        void stopChatSession(adapter.channelType, platformId, threadId, userId).catch((err) =>
+          log.error('Failed to stop session from platform stop button', { err }),
+        );
       },
       onAction(questionId, selectedOption, userId) {
         dispatchResponse({

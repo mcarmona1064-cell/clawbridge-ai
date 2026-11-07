@@ -55,6 +55,11 @@ Linking commands work before access checks, so a new account can link itself. Co
   - Create the app from `setup/channels/slack-app-manifest.json`. It turns on Socket Mode and lists exactly the scopes the adapter uses.
   - Under Basic Information → App-Level Tokens, create a token with `connections:write` and set it as `SLACK_APP_TOKEN`. Socket Mode needs no public URL and no signing secret.
   - Webhook mode (`SLACK_SIGNING_SECRET` with Event and Interactivity URLs pointing at `/webhook/slack`) still works.
+  - **Agent sessions** (Slack's agent view):
+    - While the agent works, Slack shows its status line and a stop button. The adapter sets `processing`, refreshed every 10 minutes because Slack drops it after an hour. It sets `suspended` while a question or approval card waits on the person, and `active` once it has replied.
+    - Pressing stop ends the running turn.
+    - The manifest subscribes to `agent_session_stopped`, which Slack requires before it shows a working stop button.
+    - In workspaces without agent sessions, the status line turns itself off.
 - **WhatsApp rules.**
   - Within 24 hours of the person's last message, the agent can reply freely. After that, WhatsApp only accepts pre-approved templates.
   - Set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to a **utility** template with one body variable, for example "Update from your assistant: {{1}}". Late messages, scheduled results and digests are then sent through it.
