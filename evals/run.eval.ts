@@ -22,11 +22,15 @@ vi.mock('../src/container-runner.js', () => ({
   resolveProviderName: () => 'claude',
 }));
 vi.mock('../src/stop-session.js', () => ({ stopChatSession: async () => true }));
+vi.mock('../src/webhook-server.js', () => ({ registerRawWebhookHandler: vi.fn() }));
 
 import { resetClaimGate } from '../src/claim-gate.js';
 import { closeDb, initTestDb } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
-import { CASES, type Provider } from './cases.js';
+import { CASES as BASE_CASES, type Provider } from './cases.js';
+import { M4_CASES } from './cases-m4.js';
+
+const CASES = [...BASE_CASES, ...M4_CASES];
 
 const PROVIDERS: Provider[] = ['claude', 'codex'];
 const RUNS = 3;
