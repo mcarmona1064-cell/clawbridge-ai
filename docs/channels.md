@@ -68,7 +68,9 @@ Linking commands work before access checks, so a new account can link itself. Co
   - **Guests and other organisations.** Messages from guest accounts and from people in other workspaces (Slack Connect) are ignored, and the person is told once a day in a DM. `SLACK_GUEST_POLICY=allow` and `SLACK_EXTERNAL_POLICY=allow` change that.
 - **WhatsApp rules.**
   - Within 24 hours of the person's last message, the agent can reply freely. After that, WhatsApp only accepts pre-approved templates.
-  - Set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to a **utility** template with one body variable, for example "Update from your assistant: {{1}}". Late messages, scheduled results and digests are then sent through it.
+  - Run `clawbridge-ai whatsapp-template` (with `WHATSAPP_BUSINESS_ACCOUNT_ID` set). It submits the utility template "Update from your assistant: {{1}}" to Meta and saves it as `WHATSAPP_TEMPLATE_NAME`; run it again to check approval.
+  - You can also set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to your own utility template with one body variable.
+  - Late messages, scheduled results and digests are then sent through the template.
   - Without a template, a late send is refused with a clear error rather than failing at Meta.
   - When someone sends **STOP** (or unsubscribe, cancel, quit), nothing more is sent to them until they send **START**. Their messages don't reach the agent in the meantime. Opt-outs and blocked sends are recorded in the audit log.
 - **WhatsApp.** Meta needs a public HTTPS callback URL. `clawbridge-ai tunnel` opens a Cloudflare quick tunnel and prints the exact URL to paste. Quick-tunnel URLs change on restart, so for a permanent URL point a named tunnel or reverse proxy at the webhook port (3000).

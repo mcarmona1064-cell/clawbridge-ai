@@ -340,7 +340,7 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 **Verified:**
 - 507 host tests.
 - 88/88 eval runs.
-- Agent-runner tests: 43 pass, plus the 6 known failures and no new ones.
+- Agent-runner tests: 37 pass, plus the 6 known failures and no new ones.
 - The real Claude Code CLI sends the proxy placeholder correctly.
 
 **Not verified live (no Docker on this machine, and no live accounts):**
@@ -359,4 +359,9 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 4. **Lockdown:** set `EGRESS_LOCKDOWN=on` and restart. `docker network inspect clawbridge-egress` should list the relay. From inside a container, `curl https://example.com` without the proxy should fail.
 5. **Skills:** `/skills install <owner/repo>@<sha>` → review the card → approve. Then `/skills`.
 6. **Evals:** `pnpm run eval` should give a pass^3 of 88/88 in `evals/report.json`.
+
+**After the M4 review, the remaining gaps were closed:**
+- A one-time "still working" note on long jobs (all channels except Slack, which has its own status line).
+- A digest scorecard of posted vs. responded, shown in `/digest`.
+- `clawbridge-ai whatsapp-template`, which creates and saves the 24-hour-window template.
 

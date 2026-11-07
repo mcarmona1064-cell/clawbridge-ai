@@ -59,6 +59,11 @@ if (process.argv[2] === 'chat') {
   process.exit(0);
 }
 
+if (process.argv[2] === 'whatsapp-template') {
+  const { runWhatsAppTemplateCli } = await import('../whatsapp-template.js');
+  process.exit(await runWhatsAppTemplateCli());
+}
+
 if (process.argv[2] === 'console') {
   const { consoleUrl } = await import('../admin-console.js');
   console.log(`Admin console (keep this link private): ${consoleUrl()}`);
