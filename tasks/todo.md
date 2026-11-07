@@ -52,15 +52,15 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Milestone 1: safety floor
 
-- [ ] 1.1 **No public URL where the platform allows it:**
+- [x] 1.1 **No public URL where the platform allows it:**
   - Slack Socket Mode, the default when `SLACK_APP_TOKEN` is set
   - Telegram long polling, already done
   - the Discord gateway, already done
   - for WhatsApp, a guided `cloudflared` tunnel helper plus the signature check
-- [ ] 1.2 **Egress proxy.** A host egress proxy with placeholder secrets. Containers get `CLAWBRIDGE_PLACEHOLDER_*` and the proxy swaps in real headers for allowlisted hosts only. The Codex `auth.json` is mounted read-only. Containers reach only the proxy.
-- [ ] 1.3 **Slack agent_view.** `assistant.threads.setStatus` and `agents.sessions.setStatus` statuses, with `agent_session_stopped` mapped to stop.
-- [ ] 1.4 **Audit table.** An append-only `audit_log` (triggers block UPDATE and DELETE) covering approvals, host_exec, provider switches, role changes, identity links, memory writes and outbound posts. `clawbridge-ai audit export --format jsonl|csv`.
-- [ ] 1.5 **WhatsApp policy.**
+- [x] 1.2 **Egress proxy.** A host egress proxy with placeholder secrets. Containers get `CLAWBRIDGE_PLACEHOLDER_*` and the proxy swaps in real headers for allowlisted hosts only. The Codex `auth.json` is mounted read-only. Containers reach only the proxy.
+- [x] 1.3 **Slack agent_view.** `assistant.threads.setStatus` and `agents.sessions.setStatus` statuses, with `agent_session_stopped` mapped to stop.
+- [x] 1.4 **Audit table.** An append-only `audit_log` (triggers block UPDATE and DELETE) covering approvals, host_exec, provider switches, role changes, identity links, memory writes and outbound posts. `clawbridge-ai audit export --format jsonl|csv`.
+- [x] 1.5 **WhatsApp policy.**
   - A 24-hour window tracker. Outside the window, a send must use a template; otherwise it fails with a clear message.
   - `WHATSAPP_TEMPLATES` config, plus a setup helper.
   - STOP/START opt-out handling.
@@ -164,3 +164,53 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 **Follow-ups found along the way:**
 - The WhatsApp setup step still installs the unofficial Baileys library. Switching setup to Cloud API by default belongs to M2 item 2.1.
+
+### Milestone 1 (pushed to `ai` main, 2026-11-06)
+
+**What changed for users, by channel**
+
+- **Slack:**
+  - With `SLACK_APP_TOKEN`, Socket Mode works with no public URL; the manifest turns it on.
+  - While the agent works, Slack's agent-session status line and stop button appear. The status reads "suspended" while a card waits on someone, and stop ends the turn.
+- **WhatsApp:**
+  - `clawbridge-ai tunnel` prints a public callback URL to paste into Meta.
+  - The 24-hour reply window is enforced; later messages use `WHATSAPP_TEMPLATE_NAME` or are refused clearly.
+  - STOP/START opt-outs work.
+- **Telegram and Discord:** already needed no public URL. Nothing new here.
+- **Every channel:**
+  - An append-only, hash-chained audit log, with `clawbridge-ai audit export|verify`.
+  - Admin alerts now go only to owners and admins. They used to go to every chat the bot was in, a privacy bug fixed this milestone.
+  - With `CREDENTIAL_PROXY=on`, Claude containers hold a per-session placeholder instead of the real token.
+  - `EGRESS_PROXY=on` blocks private, LAN and cloud-metadata addresses, and enforces `EGRESS_ALLOWLIST`.
+
+**Verified:**
+- 395 host tests pass.
+- The real Claude Code CLI sends the placeholder to the proxy correctly: `Bearer cbp_…`, plus the `/api/hello` probe.
+
+**Not verified:**
+- The live proxy round trip to Anthropic.
+- Socket Mode against a real Slack app.
+- `agents.sessions.setStatus` in a real workspace.
+- WhatsApp templates with Meta.
+
+**Still open in M1 scope:**
+- Network-level lockdown: an internal Docker network whose only route out is the proxy. Needs Docker to build and test.
+- Proxying the Codex `auth.json`, which Codex rewrites itself.
+
+**Live checks**
+1. **Slack:**
+   - Create the app from the manifest, add an app-level token, set `SLACK_APP_TOKEN`, and restart. The logs should say "Using Socket Mode".
+   - DM the bot. The status line should show while it works, and Stop should end the turn.
+2. **WhatsApp:**
+   - Run `clawbridge-ai tunnel` and paste the URL into Meta.
+   - Send "hi" and get a reply.
+   - Send STOP: you get a confirmation, and the agent stops replying until START.
+3. **Proxy:**
+   - Set `CREDENTIAL_PROXY=on` and restart, then send a message.
+   - `docker exec <container> env | grep CLAUDE` should show only `cbp_…`.
+4. **Audit:** `clawbridge-ai audit verify` should report the hash chain intact.
+
+**Incident during verification:**
+- While checking the proxy with the host's `claude` CLI, Claude Code fell back to the Mac's keychain subscription login for the API-key test. It sent those real tokens to a local test server on 127.0.0.1.
+- Nothing left the machine, and the log was deleted. The tokens did appear in the session transcript, so the user was asked to sign out of the CLI and back in.
+- Lesson: when testing credential handling with a real CLI, run it with an empty HOME so it can't fall back to stored logins.
