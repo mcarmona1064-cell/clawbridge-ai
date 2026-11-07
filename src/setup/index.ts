@@ -6,8 +6,8 @@
  *
  * Three paths:
  *   1. Fresh install  — guided .env generation + docker compose up
- *   2. Migrate from OpenClaw
- *   3. Migrate from ClawBridge (Claude)
+ *   2. Upgrade from ClawBridge or ClawBridge Codex (also `clawbridge-ai migrate`)
+ *   3. Migrate from OpenClaw
  */
 import { spawnSync, execSync } from 'child_process';
 import fs from 'fs';
@@ -35,6 +35,27 @@ import {
   type MigrationSourceType,
   type VerificationCheck,
 } from './migrate.js';
+
+import {
+  describeBackup,
+  describeInstall,
+  findAiServices,
+  findLegacyInstalls,
+  findPidFileProcesses,
+  inspectLegacyDir,
+  LEGACY_LABEL,
+  latestLegacyBackup,
+  LegacyUpgradeError,
+  markAiInstall,
+  planLegacyUpgrade,
+  restartService,
+  rollbackLegacyUpgrade,
+  serviceState,
+  setEnvValue,
+  upgradeLegacyInstall,
+  verifyLegacyUpgrade,
+  type LegacyInstall,
+} from './migrate-legacy.js';
 
 import { checkForUpdate, runUpgrade } from '../updater.js';
 import { getContainerImageBase, getDefaultContainerImage, getLaunchdLabel, getSystemdUnit } from '../install-slug.js';
@@ -596,6 +617,7 @@ function checkNodePrerequisites(): void {
 // ─── Fresh install flow ───────────────────────────────────────────────────────
 
 async function runFreshInstall(): Promise<void> {
+  if (await upgradeInsteadOfOverwriting()) return;
   checkDockerPrerequisites();
   checkNodePrerequisites();
   p.log.step('Starting fresh install…');
@@ -694,7 +716,14 @@ async function runFreshInstall(): Promise<void> {
     process.exit(0);
   }
 
+  if (fs.existsSync(envPath)) {
+    const kept = `${envPath}.before-setup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    fs.copyFileSync(envPath, kept);
+    fs.chmodSync(kept, 0o600);
+    p.log.info(`Your previous .env is kept as ${kept.replace(os.homedir(), '~')}`);
+  }
   fs.writeFileSync(envPath, envContent);
+  markAiInstall({ packageRoot: packageRootDir() });
 
   // Hindsight auto-config: write LLM provider settings if HINDSIGHT_URL is set
   // and these vars are not already present
@@ -892,6 +921,7 @@ function printAuditReport(source: MigrationSource, audit: MigrationAudit): void 
 // ─── Migration flow ───────────────────────────────────────────────────────────
 
 async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<void> {
+  if (await upgradeInsteadOfOverwriting()) return;
   checkDockerPrerequisites();
   checkNodePrerequisites();
   const typeLabel: Record<string, string> = {
@@ -1188,6 +1218,7 @@ async function runMigrationFlow(preferredType?: MigrationSourceType): Promise<vo
   ) as boolean;
   if (confirmEnvWrite) {
     fs.writeFileSync(envPath, buildEnvFile(migratedCfg, sourceEnv));
+    markAiInstall({ packageRoot: packageRootDir() });
     p.log.success(`.env written to ~/.clawbridge/.env`);
   }
 
@@ -1274,6 +1305,303 @@ async function askManualPath(): Promise<MigrationSource> {
     }
     return result;
   }
+}
+
+// ─── Upgrade from ClawBridge / ClawBridge Codex ───────────────────────────────
+
+function packageRootDir(): string {
+  return path.resolve(fileURLToPath(new URL(import.meta.url)), '../../..');
+}
+
+interface LegacyFlowOptions {
+  from?: string;
+  dryRun?: boolean;
+  /** No questions: take the defaults (for scripts). */
+  yes?: boolean;
+}
+
+async function chooseLegacyInstall(opts: LegacyFlowOptions): Promise<LegacyInstall | null> {
+  const expand = (v: string) => path.resolve(v.trim().replace(/^~(?=$|\/)/, os.homedir()));
+  if (opts.from) {
+    const hit = inspectLegacyDir(expand(opts.from));
+    if (!hit) p.log.error(`No ClawBridge or ClawBridge Codex install found at ${opts.from}.`);
+    return hit;
+  }
+  const found = findLegacyInstalls();
+  if (found.length === 1) return found[0];
+  if (found.length > 1) {
+    if (opts.yes) return found[0];
+    const pick = ensure(
+      await p.select<string>({
+        message: 'Which install should be upgraded?',
+        options: found.map((i, n) => ({ value: String(n), label: describeInstall(i) })),
+      }),
+    ) as string;
+    return found[Number(pick)];
+  }
+  p.log.warn('No ClawBridge or ClawBridge Codex install found in the usual places.');
+  if (opts.yes) return null;
+  for (;;) {
+    const typed = ensure(
+      await p.text({
+        message: 'Folder of the old install (the one with .env and data/). Leave empty to stop.',
+        placeholder: '~/.clawbridge',
+      }),
+    ) as string;
+    if (!typed?.trim()) return null;
+    const hit = inspectLegacyDir(expand(typed));
+    if (hit) return hit;
+    p.log.error(`That folder doesn't look like a ClawBridge or ClawBridge Codex install.`);
+  }
+}
+
+function printLegacyAudit(i: LegacyInstall): void {
+  const rows: Array<[string, string]> = [
+    ['Install:', describeInstall(i)],
+    ['Agents run on:', i.previousProvider === 'codex' ? 'Codex' : 'Claude'],
+    ['Agent groups:', String(i.groups)],
+    ['Conversations:', String(i.sessions)],
+    ['Old service:', i.services.length ? i.services.map((s) => s.label).join(', ') : 'none found'],
+  ];
+  const w = Math.max(...rows.map(([key]) => key.length));
+  p.note(rows.map(([key, v]) => `  ${dim(key.padEnd(w))}  ${k.bold(v)}`).join('\n'), 'Found');
+}
+
+/** Offer the provider the old install didn't have. Returns true when .env changed. */
+async function offerSecondProvider(): Promise<boolean> {
+  const envPath = path.join(os.homedir(), '.clawbridge', '.env');
+  const env = parseEnvFile(envPath);
+  const enabled = (env.get('ENABLED_AGENT_PROVIDERS') ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+  // Cancelling here only skips the offer: the upgrade is already complete.
+  const ask = async (message: string) => {
+    const v = await p.confirm({ message, initialValue: false });
+    return !p.isCancel(v) && v === true;
+  };
+  if (!enabled.includes('claude')) {
+    if (!(await ask('Also let agents use Claude? (your Claude subscription)'))) return false;
+    const cred = await setupClaudeAuth(env);
+    if (!cred) return false;
+    let text = fs.readFileSync(envPath, 'utf-8');
+    text = setEnvValue(text, cred.key, cred.value);
+    text = setEnvValue(text, 'ENABLED_AGENT_PROVIDERS', ['claude', ...enabled].join(','));
+    fs.writeFileSync(envPath, text, { mode: 0o600 });
+    p.log.success('Claude turned on. Switch an agent with /provider claude.');
+    return true;
+  }
+  if (!enabled.includes('codex')) {
+    if (!(await ask('Also let agents use Codex? (your ChatGPT subscription)'))) return false;
+    await setupCodexAuth();
+    const text = setEnvValue(
+      fs.readFileSync(envPath, 'utf-8'),
+      'ENABLED_AGENT_PROVIDERS',
+      [...enabled, 'codex'].join(','),
+    );
+    fs.writeFileSync(envPath, text, { mode: 0o600 });
+    p.log.success('Codex turned on. Switch an agent with /provider codex.');
+    return true;
+  }
+  return false;
+}
+
+async function confirmOrNo(message: string, initialValue: boolean): Promise<boolean> {
+  const v = await p.confirm({ message, initialValue });
+  return !p.isCancel(v) && v === true;
+}
+
+async function runLegacyUpgradeFlow(opts: LegacyFlowOptions = {}): Promise<number> {
+  const install = await chooseLegacyInstall(opts);
+  if (!install) {
+    p.outro(dim('Nothing to upgrade.'));
+    return 1;
+  }
+  printLegacyAudit(install);
+
+  const packageRoot = packageRootDir();
+  const plan = planLegacyUpgrade(install, { packageRoot });
+  p.note(
+    plan.map((step, n) => `${n + 1}. ${step}`).join('\n'),
+    opts.dryRun ? 'Dry run: this is what would happen (nothing changed)' : 'The upgrade will',
+  );
+  if (opts.dryRun) {
+    p.outro(dim('Run without --dry-run to upgrade.'));
+    return 0;
+  }
+  if (!opts.yes && !(await confirmOrNo('Upgrade now?', true))) {
+    p.outro(dim('Nothing changed.'));
+    return 0;
+  }
+
+  const s = p.spinner();
+  s.start(`Upgrading ${LEGACY_LABEL[install.kind]}…`);
+  let report;
+  try {
+    report = await upgradeLegacyInstall(install, { packageRoot });
+    s.stop(k.green(`${LEGACY_LABEL[install.kind]} upgraded.`));
+  } catch (err) {
+    s.stop(k.red(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`));
+    // Only ever undo the backup this run made.
+    const backupDir = err instanceof LegacyUpgradeError ? err.backupDir : null;
+    if (!backupDir) {
+      p.log.info('Nothing was changed.');
+      return 1;
+    }
+    const undo = opts.yes || (await confirmOrNo('Put everything back as it was?', true));
+    if (undo) {
+      try {
+        for (const step of await rollbackLegacyUpgrade({ backupDir, packageRoot })) p.log.info(step);
+      } catch (e) {
+        p.log.error(`Rollback failed: ${e instanceof Error ? e.message : String(e)}`);
+        p.log.info(`The backup is in ${backupDir}. Try again with: clawbridge-ai migrate --rollback`);
+      }
+    } else {
+      p.log.info(`Left as it is. Undo later with: clawbridge-ai migrate --rollback`);
+    }
+    return 1;
+  }
+  for (const step of report.steps) p.log.success(step);
+
+  // The old service is gone now, so put the new one in its place before
+  // anything that can be cancelled (the image build): it runs without the
+  // image and agents start replying once the image is built.
+  const env = parseEnvFile(path.join(os.homedir(), '.clawbridge', '.env'));
+  const service = await startAiService(env.get('ASSISTANT_NAME') ?? 'ClawBridge');
+
+  let built = false;
+  const docker = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 5000 });
+  if (docker.status === 0) built = opts.yes ? await buildContainerImage() : await buildContainerImageWithRetry();
+  else p.log.warn("Docker is not running, so the new agent image isn't built yet. Agents can't reply until it is.");
+
+  const checks = [
+    ...verifyLegacyUpgrade({ packageRoot }, install),
+    { name: 'New service', ok: service.ok, detail: service.detail },
+  ];
+  p.note(checks.map((c) => `${c.ok ? k.green('✓') : k.red('✗')} ${c.name}: ${dim(c.detail)}`).join('\n'), 'Checks');
+  const next = report.next.filter(
+    (n) => !(service.ok && /service install/.test(n)) && !(built && /build-image/.test(n)),
+  );
+  p.note(next.map((n) => `• ${n}`).join('\n'), 'Next');
+
+  if (!opts.yes && (await offerSecondProvider())) {
+    // Restart whatever is running so it rereads .env.
+    for (const svc of findAiServices(path.join(os.homedir(), '.clawbridge'))) restartService(svc);
+    const wrapper = path.join(packageRoot, 'start-clawbridge.sh');
+    for (const proc of findPidFileProcesses([packageRoot])) {
+      try {
+        process.kill(proc.pid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+      for (let i = 0; i < 50 && findPidFileProcesses([packageRoot]).length; i++)
+        await new Promise((r) => setTimeout(r, 200));
+      if (fs.existsSync(wrapper)) spawnSync('bash', [wrapper], { stdio: 'ignore' });
+    }
+  }
+
+  const ok = checks.every((c) => c.ok);
+  p.outro(
+    ok
+      ? k.green('✅ Upgrade done.') + ` Your agents, conversations and settings are in ${k.bold('~/.clawbridge')}.`
+      : k.yellow('Upgrade done with warnings — see Checks above, or run: clawbridge-ai doctor'),
+  );
+  return ok ? 0 : 1;
+}
+
+/** `clawbridge-ai migrate [--from <dir>] [--dry-run] [--yes] [--rollback]` */
+async function runMigrateCli(args: string[]): Promise<number> {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(
+      [
+        'Usage: clawbridge-ai migrate [options]',
+        '',
+        'Upgrade an existing ClawBridge or ClawBridge Codex install to ClawBridge AI.',
+        'Agents, conversations, schedules and .env settings carry over; everything',
+        'changed is backed up first.',
+        '',
+        '  --from <dir>   the old install (default: look in ~/.clawbridge and the usual places)',
+        '  --dry-run      show what would change, change nothing',
+        '  --yes          no questions; take the defaults',
+        '  --rollback     undo the last upgrade and start the old service again',
+        '  --openclaw     import from OpenClaw or NanoClaw instead',
+      ].join('\n'),
+    );
+    return 0;
+  }
+  printBanner();
+  if (args.includes('--openclaw')) {
+    await runMigrationFlow();
+    return typeof process.exitCode === 'number' ? process.exitCode : 0;
+  }
+  const yes = args.includes('--yes') || args.includes('-y');
+  if (args.includes('--rollback')) {
+    p.intro(brandBold('Undo the ClawBridge AI upgrade'));
+    const backupDir = latestLegacyBackup();
+    const info = backupDir ? describeBackup(backupDir) : null;
+    if (!backupDir || !info) {
+      p.log.error('No upgrade backup found in ~/.clawbridge/upgrade-backup/.');
+      return 1;
+    }
+    p.note(
+      [
+        `Back to ${LEGACY_LABEL[info.kind]}${info.version ? ' ' + info.version : ''}, as it was on ${new Date(info.createdAt).toLocaleString()}.`,
+        info.completed ? '' : 'That upgrade stopped partway.',
+        'ClawBridge AI is stopped first. What it has now (chats since the upgrade, settings) is kept in the backup folder, not deleted.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      'Rollback',
+    );
+    if (!yes && !(await confirmOrNo('Roll back now?', false))) {
+      p.outro(dim('Nothing changed.'));
+      return 0;
+    }
+    try {
+      for (const step of await rollbackLegacyUpgrade({ backupDir, packageRoot: packageRootDir() })) p.log.success(step);
+      p.outro(k.green('Rolled back.'));
+      return 0;
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      return 1;
+    }
+  }
+  const fromAt = args.indexOf('--from');
+  p.intro(brandBold('Upgrade to ClawBridge AI'));
+  return runLegacyUpgradeFlow({
+    from: fromAt >= 0 ? args[fromAt + 1] : undefined,
+    dryRun: args.includes('--dry-run'),
+    yes,
+  });
+}
+
+/** `clawbridge-ai service install` — register (or re-register) the background service. */
+async function runServiceCli(args: string[]): Promise<number> {
+  if (args[0] !== 'install') {
+    console.log('Usage: clawbridge-ai service install');
+    return args[0] ? 1 : 0;
+  }
+  const env = parseEnvFile(path.join(os.homedir(), '.clawbridge', '.env'));
+  const service = await startAiService(env.get('ASSISTANT_NAME') ?? 'ClawBridge');
+  (service.ok ? p.log.success : p.log.error)(`ClawBridge AI service: ${service.detail}`);
+  return service.ok ? 0 : 1;
+}
+
+/**
+ * Fresh install and the OpenClaw import write a new .env into ~/.clawbridge.
+ * When that folder still holds an older ClawBridge, upgrade it instead, so its
+ * service is stopped and its settings are kept. Returns true when handled.
+ */
+async function upgradeInsteadOfOverwriting(): Promise<boolean> {
+  const legacy = inspectLegacyDir(path.join(os.homedir(), '.clawbridge'));
+  if (!legacy) return false;
+  p.log.warn(`~/.clawbridge holds ${describeInstall(legacy)}. Starting over here would overwrite its settings.`);
+  if (await confirmOrNo('Upgrade it instead, keeping its agents and settings? (recommended)', true)) {
+    process.exitCode = await runLegacyUpgradeFlow({ from: legacy.dataDir });
+    return true;
+  }
+  p.cancel('Stopped. Move ~/.clawbridge aside first if you really want to start over.');
+  process.exit(0);
 }
 
 // ─── Container image build ────────────────────────────────────────────────────
@@ -1505,31 +1833,73 @@ async function registerService(assistantName: string): Promise<void> {
   }
 }
 
+/**
+ * Register the service and make sure it is actually running. The nohup
+ * fallback only writes a wrapper, so it is started here.
+ */
+async function startAiService(assistantName: string): Promise<{ ok: boolean; detail: string }> {
+  await registerService(assistantName);
+  const dest = path.join(os.homedir(), '.clawbridge');
+  const packageRoot = packageRootDir();
+  const wrapper = path.join(packageRoot, 'start-clawbridge.sh');
+  // registerSystemd falls back to the nohup wrapper when systemctl fails, and
+  // may leave a unit file behind, so start the wrapper whenever no service is running.
+  const serviceUp = findAiServices(dest).some((svc) => serviceState(svc).state === 'running');
+  if (!serviceUp && fs.existsSync(wrapper) && !findPidFileProcesses([packageRoot]).length) {
+    spawnSync('bash', [wrapper], { stdio: 'ignore' });
+  }
+  for (const svc of findAiServices(dest)) {
+    if (serviceState(svc).state === 'running') return { ok: true, detail: svc.label };
+  }
+  const proc = findPidFileProcesses([packageRoot])[0];
+  if (proc) return { ok: true, detail: `pid ${proc.pid}` };
+  return { ok: false, detail: 'not running. Start it with: clawbridge-ai service install' };
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   printBanner();
-  p.intro(`${brandBold('Welcome to ClawBridge Agent setup.')}`);
+  p.intro(`${brandBold('Welcome to ClawBridge AI setup.')}`);
+
+  // An older ClawBridge / ClawBridge Codex install is the most likely reason
+  // someone runs setup on a machine that already has ~/.clawbridge.
+  const legacy = findLegacyInstalls();
+  if (legacy.length) p.log.info(`Found ${describeInstall(legacy[0])}. You can upgrade it and keep everything.`);
 
   const mode = ensure(
     await p.select({
       message: 'How would you like to get started?',
       options: [
         { value: 'fresh', label: 'Fresh install' },
+        {
+          value: 'legacy',
+          label: 'Upgrade from ClawBridge or ClawBridge Codex',
+          hint: legacy.length ? 'found on this machine' : 'keeps agents, chats and settings',
+        },
         { value: 'openclaw', label: 'Migrate from OpenClaw' },
-        { value: 'clawbridge', label: 'Migrate from ClawBridge (Claude)' },
       ],
+      initialValue: legacy.length ? 'legacy' : 'fresh',
     }),
-  ) as 'fresh' | 'openclaw' | 'clawbridge';
+  ) as 'fresh' | 'legacy' | 'openclaw';
 
   if (mode === 'fresh') {
     await runFreshInstall();
+  } else if (mode === 'legacy') {
+    process.exitCode = await runLegacyUpgradeFlow();
   } else {
     await runMigrationFlow(mode);
   }
 }
 
-main().catch((err) => {
+const subcommands: Record<string, (args: string[]) => Promise<number>> = {
+  migrate: runMigrateCli,
+  service: runServiceCli,
+};
+const sub = subcommands[process.argv[2] ?? ''];
+const entry = sub ? () => sub(process.argv.slice(3)).then((code) => process.exit(code)) : main;
+
+entry().catch((err) => {
   p.log.error(err instanceof Error ? err.message : String(err));
   p.cancel('Setup aborted.');
   process.exit(1);

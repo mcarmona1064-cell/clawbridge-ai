@@ -124,11 +124,11 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     }
   });
 
-  it('shows ClawBridge Claude migration in setup instead of NanoClaw', () => {
+  it('offers the ClawBridge / ClawBridge Codex upgrade in setup instead of NanoClaw', () => {
     const setupWizard = read('src/setup/index.ts');
-    expect(setupWizard).toContain('Migrate from ClawBridge (Claude)');
+    expect(setupWizard).toContain('Upgrade from ClawBridge or ClawBridge Codex');
     expect(setupWizard).not.toContain("label: 'Migrate from NanoClaw'");
-    expect(setupWizard).toContain("value: 'clawbridge'");
+    expect(setupWizard).toContain("value: 'legacy'");
   });
 
   it('mounts one composed instruction file as both AGENTS.md and CLAUDE.md', () => {
@@ -158,6 +158,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
         'src/providers/claude.ts', // passes the credential into claude containers
         'src/setup/index.ts', // setup wizard writes the token to ~/.clawbridge/.env
         'src/setup/migrate.ts', // migration detects legacy Claude env/files
+        'src/setup/migrate-legacy.ts', // upgrade enables Claude when the old .env has a Claude credential
         'src/doctor.ts', // reports Claude auth status
         'setup/verify.ts',
         'setup/probe.sh',
@@ -202,10 +203,10 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
     expect(setupWizard).toContain('nohup');
   });
 
-  it('migration only treats ~/.clawbridge as legacy clawbridge-agent when provider is non-codex', () => {
+  it('upgrades older ClawBridge installs through the legacy importer, not the OpenClaw one', () => {
     const migrate = read('src/setup/migrate.ts');
-    expect(migrate).toContain("provider && provider !== 'codex'");
-    expect(migrate).toContain("if (type === 'clawbridge') continue");
+    expect(migrate).toContain("export type MigrationSourceType = 'openclaw' | 'nanoclaw';");
+    expect(read('src/setup/migrate-legacy.ts')).toContain("'clawbridge-codex': 'clawbridge-codex'");
   });
 
   it('ships both providers in the container and keeps each SDK confined to its provider module', () => {

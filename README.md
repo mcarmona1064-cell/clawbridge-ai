@@ -62,7 +62,33 @@ If installed globally:
 clawbridge-ai
 ```
 
-To migrate from an existing OpenClaw or NanoClaw install, choose the migration path in the setup wizard.
+### Upgrading from ClawBridge or ClawBridge Codex
+
+Your agents, conversations, schedules and settings carry over. Run the new CLI and pick **Upgrade from ClawBridge or ClawBridge Codex** (setup suggests it when it finds an old install), or run it directly:
+
+```bash
+clawbridge-ai migrate --dry-run
+```
+
+```bash
+clawbridge-ai migrate
+```
+
+The upgrade:
+
+- stops the old service and checks it really stopped, so the two versions never answer the same bots;
+- backs up `.env`, every database and each agent's instruction files to `~/.clawbridge/upgrade-backup/`;
+- keeps your agents on the provider they used (Codex or Claude), and offers to turn on the other one;
+- moves agents with extra packages onto the new image (rebuilt the first time each one runs);
+- repoints `~/.clawbridge` at the new package, then builds the new agent image and starts the new service.
+
+Every `.env` setting is kept. Installs that ran from a source checkout are copied into `~/.clawbridge`, and the checkout is left as it was. If the service ever needs registering again, run `clawbridge-ai service install`.
+
+`clawbridge-ai migrate --rollback` undoes the upgrade and starts the old service again. ClawBridge AI is stopped first, and what it had (chats since the upgrade, settings) is kept in the backup folder rather than deleted.
+
+Memories saved before memory became per-conversation (the `client-global` Hindsight bank) are kept but no longer recalled. Re-add anything the whole team should know with `/teamfact`.
+
+To migrate from an existing OpenClaw or NanoClaw install, choose **Migrate from OpenClaw** in the setup wizard, or run `clawbridge-ai migrate --openclaw`.
 
 ---
 

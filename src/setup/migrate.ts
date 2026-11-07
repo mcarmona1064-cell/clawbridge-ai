@@ -4,9 +4,10 @@
  * Handles detection and migration from:
  *   - OpenClaw            (~/.openclaw, ~/openclaw, ~/clawdbot)
  *   - NanoClaw            (~/.nanoclaw)
- *   - clawbridge-agent    (~/.clawbridge with a non-codex AGENT_PROVIDER) —
- *                         in-place provider swap; data dir is shared with
- *                         clawbridge-ai, so this is just a config flip.
+ *
+ * Earlier releases of this product (clawbridge, clawbridge-agent,
+ * clawbridge-codex) share its data format and are upgraded in place by
+ * ./migrate-legacy.ts instead.
  */
 import fs from 'fs';
 import path from 'path';
@@ -20,7 +21,7 @@ import type { MemorySegment } from '../memory/types.js';
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
-export type MigrationSourceType = 'openclaw' | 'nanoclaw' | 'clawbridge';
+export type MigrationSourceType = 'openclaw' | 'nanoclaw';
 
 export interface MigrationSource {
   type: MigrationSourceType;
@@ -85,13 +86,6 @@ const CANDIDATE_PATHS: Array<{ paths: string[]; type: MigrationSourceType }> = [
     ],
     type: 'nanoclaw',
   },
-  {
-    // clawbridge-agent uses the same ~/.clawbridge/ data dir we use here.
-    // We only treat it as a migration source if the existing .env declares
-    // a non-codex AGENT_PROVIDER (handled in identifyType).
-    paths: [path.join(HOME, '.clawbridge')],
-    type: 'clawbridge',
-  },
 ];
 
 function identifyType(dir: string): MigrationSourceType | null {
@@ -112,22 +106,6 @@ function identifyType(dir: string): MigrationSourceType | null {
   if (base.includes('openclaw') || base.includes('clawdbot')) return 'openclaw';
   if (base.includes('nanoclaw')) return 'nanoclaw';
 
-  // clawbridge-agent shares ~/.clawbridge/ with us. Treat it as a migration
-  // source only if its .env still declares a non-codex AGENT_PROVIDER
-  // (otherwise it's already migrated, or just an empty data dir).
-  if (path.resolve(dir) === path.join(HOME, '.clawbridge')) {
-    const envPath = path.join(dir, '.env');
-    if (fs.existsSync(envPath)) {
-      try {
-        const env = fs.readFileSync(envPath, 'utf-8');
-        const m = env.match(/^AGENT_PROVIDER=(.+)$/m);
-        const provider = m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
-        if (provider && provider !== 'codex') return 'clawbridge';
-      } catch {
-        // unreadable .env — assume not a migration source
-      }
-    }
-  }
   return null;
 }
 
@@ -138,13 +116,6 @@ export async function detectInstall(preferredType?: MigrationSourceType): Promis
       if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
         const detected = identifyType(candidate);
         if (detected) return { type: detected, path: candidate };
-
-        // Most candidate paths are type-signaling by directory name, but
-        // ~/.clawbridge is also the destination data dir for clawbridge-ai.
-        // Do not treat it as a legacy clawbridge-agent source unless
-        // identifyType() confirmed a non-codex AGENT_PROVIDER.
-        if (type === 'clawbridge') continue;
-
         return { type, path: candidate };
       }
     }
@@ -159,7 +130,7 @@ export function resolveManualPath(dir: string): MigrationSource | { error: strin
   const type = identifyType(resolved);
   if (!type) {
     return {
-      error: `Could not identify install type at ${resolved}. Is this an OpenClaw, NanoClaw, or clawbridge-agent directory?`,
+      error: `Could not identify install type at ${resolved}. Is this an OpenClaw or NanoClaw directory? (For an older ClawBridge or ClawBridge Codex install, run: clawbridge-ai migrate)`,
     };
   }
   return { type, path: resolved };
@@ -750,35 +721,6 @@ export async function runMigration(
     scheduledTasksMigrated: 0,
   };
 
-  // clawbridge-agent → clawbridge-ai is an in-place migration: source is
-  // the same ~/.clawbridge/ data dir we'd be migrating *into*. No copies
-  // needed. Flip the legacy AGENT_PROVIDER marker to codex (so this install
-  // is no longer detected as clawbridge-agent) and carry the old provider
-  // forward as DEFAULT_AGENT_PROVIDER, so existing agents keep running on
-  // Claude. Both providers ship in one image; switch per group with
-  // /provider.
-  if (source.type === 'clawbridge') {
-    emit('provider-swap', 'Marking ~/.clawbridge as migrated (keeping your current provider as the default)');
-    const envPath = path.join(CLAWBRIDGE_HOME, '.env');
-    if (fs.existsSync(envPath)) {
-      let envContent = fs.readFileSync(envPath, 'utf-8');
-      const providerLine = /^AGENT_PROVIDER=(.*)$/m;
-      const previous = (envContent.match(providerLine)?.[1] ?? '').trim().replace(/^['"]|['"]$/g, '');
-      if (providerLine.test(envContent)) {
-        envContent = envContent.replace(providerLine, 'AGENT_PROVIDER=codex');
-      } else {
-        envContent = envContent.trimEnd() + '\nAGENT_PROVIDER=codex\n';
-      }
-      const keepDefault = previous && previous !== 'codex' ? previous : '';
-      if (keepDefault && !/^DEFAULT_AGENT_PROVIDER=/m.test(envContent)) {
-        envContent = envContent.trimEnd() + `\nDEFAULT_AGENT_PROVIDER=${keepDefault}\n`;
-      }
-      fs.writeFileSync(envPath, envContent, 'utf-8');
-    }
-    emit('provider-swap', 'Done. Re-run `clawbridge-ai setup` (or restart the service) to pick up the new image.');
-    return result;
-  }
-
   // 1. Backup existing ClawBridge data
   emit('backup', 'Creating backup of existing ClawBridge data…');
   const backupDir = path.join(CLAWBRIDGE_HOME, 'migration-backup');
@@ -1109,11 +1051,6 @@ export async function rollback(_source: MigrationSource): Promise<void> {
 }
 
 export function deactivateSource(source: MigrationSource): void {
-  // clawbridge-agent shares ~/.clawbridge/ with us — writing a deactivation
-  // marker would tag our own data dir as deactivated. Skip; the in-place
-  // migration handled the provider swap already.
-  if (source.type === 'clawbridge') return;
-
   fs.writeFileSync(
     path.join(source.path, '.clawbridge-deactivated'),
     JSON.stringify(
@@ -1140,10 +1077,6 @@ export function deactivateSource(source: MigrationSource): void {
           ['launchctl', 'stop', 'com.nanoclaw'],
         ]
       : [['systemctl', '--user', 'stop', 'nanoclaw']],
-    // clawbridge-agent shares the launchd label and data dir with us — no
-    // deactivation needed. The user's next setup run will re-register the
-    // service against the codex binary.
-    clawbridge: [],
   };
   // Try each command, ignore failures
   for (const cmd of stopCmds[source.type]) {

@@ -8,6 +8,10 @@
 - **Hindsight memory is scoped per conversation.** Previously every turn went into one shared `client-global` bank and was recalled everywhere. Memories in `client-global` are no longer recalled.
 
 ### Added
+- **Upgrade from ClawBridge or ClawBridge Codex**: `clawbridge-ai migrate` (or the setup menu). It finds the old install in `~/.clawbridge` or a source checkout, stops the old service (launchd, systemd user or system unit, or nohup) and confirms it stopped, backs up `.env`, every database and the agents' instruction files to `~/.clawbridge/upgrade-backup/`, adds the dual-provider settings and keeps the rest, moves per-agent images onto the new base, repoints the runtime links, then builds the image and starts the new service. Supports `--dry-run`, `--yes` and `--rollback`; rollback stops ClawBridge AI first and keeps its current state in the backup. An upgrade that stops partway blocks another until it is rolled back.
+- `clawbridge-ai service install` registers the background service again.
+- Setup no longer overwrites an older ClawBridge install in `~/.clawbridge`: Fresh install and the OpenClaw import offer the upgrade instead, and Fresh install keeps a copy of any existing `.env`.
+- Fresh installs now create the `container` and `src/shared` links in `~/.clawbridge` that the service needs, and mark the folder as a ClawBridge AI install.
 - Claude and Codex providers in one image, switchable per agent group or session with `/provider`.
 - Team memory: a shared bank per agent group that only takes facts approved through `propose_team_memory` or added with `/teamfact`, with host-stamped provenance tags.
 

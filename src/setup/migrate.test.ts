@@ -23,68 +23,34 @@ describe('clawbridge-ai migration detection', () => {
     vi.resetModules();
   });
 
-  it('does not auto-detect ~/.clawbridge as clawbridge-agent when it is already codex', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-codex-home-'));
-    fs.mkdirSync(path.join(home, '.clawbridge'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.clawbridge', '.env'), 'AGENT_PROVIDER=codex\nTELEGRAM_BOT_TOKEN=x\n');
-
-    const { detectInstall } = await loadMigrateWithHome(home);
-
-    await expect(detectInstall()).resolves.toBeNull();
-  });
-
-  it('does not auto-detect an empty ~/.clawbridge data dir as a legacy clawbridge-agent install', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-empty-home-'));
-    fs.mkdirSync(path.join(home, '.clawbridge'), { recursive: true });
-
-    const { detectInstall } = await loadMigrateWithHome(home);
-
-    await expect(detectInstall()).resolves.toBeNull();
-  });
-
-  it('auto-detects ~/.clawbridge only when it still declares a non-codex provider', async () => {
+  it('never offers ~/.clawbridge to the OpenClaw/NanoClaw importer', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-legacy-home-'));
     fs.mkdirSync(path.join(home, '.clawbridge'), { recursive: true });
     fs.writeFileSync(path.join(home, '.clawbridge', '.env'), 'AGENT_PROVIDER=claude\nTELEGRAM_BOT_TOKEN=x\n');
 
     const { detectInstall } = await loadMigrateWithHome(home);
 
-    await expect(detectInstall()).resolves.toEqual({
-      type: 'clawbridge',
-      path: path.join(home, '.clawbridge'),
-    });
+    await expect(detectInstall()).resolves.toBeNull();
   });
 
   it('honors the requested migration source type when multiple installs exist', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-multi-home-'));
     fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
-    fs.mkdirSync(path.join(home, '.clawbridge'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.clawbridge', '.env'), 'AGENT_PROVIDER=claude\nTELEGRAM_BOT_TOKEN=x\n');
+    fs.mkdirSync(path.join(home, '.nanoclaw'), { recursive: true });
 
     const { detectInstall } = await loadMigrateWithHome(home);
 
-    await expect(detectInstall('clawbridge')).resolves.toEqual({
-      type: 'clawbridge',
-      path: path.join(home, '.clawbridge'),
-    });
-    await expect(detectInstall('openclaw')).resolves.toEqual({
-      type: 'openclaw',
-      path: path.join(home, '.openclaw'),
-    });
+    await expect(detectInstall('nanoclaw')).resolves.toEqual({ type: 'nanoclaw', path: path.join(home, '.nanoclaw') });
+    await expect(detectInstall('openclaw')).resolves.toEqual({ type: 'openclaw', path: path.join(home, '.openclaw') });
   });
 
-  it('keeps the legacy provider as DEFAULT_AGENT_PROVIDER when migrating clawbridge-agent in place', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-inplace-home-'));
-    const cbHome = path.join(home, '.clawbridge');
-    fs.mkdirSync(cbHome, { recursive: true });
-    fs.writeFileSync(path.join(cbHome, '.env'), 'AGENT_PROVIDER=claude\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-x\n');
+  it('points older ClawBridge installs at clawbridge-ai migrate', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-manual-home-'));
+    const dir = path.join(home, 'something');
+    fs.mkdirSync(dir, { recursive: true });
 
-    const { runMigration } = await loadMigrateWithHome(home);
-    await runMigration({ type: 'clawbridge', path: cbHome }, {} as never, []);
+    const { resolveManualPath } = await loadMigrateWithHome(home);
 
-    const env = fs.readFileSync(path.join(cbHome, '.env'), 'utf-8');
-    expect(env).toMatch(/^AGENT_PROVIDER=codex$/m);
-    expect(env).toMatch(/^DEFAULT_AGENT_PROVIDER=claude$/m);
-    expect(env).toContain('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-x');
+    expect(resolveManualPath(dir)).toEqual({ error: expect.stringContaining('clawbridge-ai migrate') });
   });
 });
