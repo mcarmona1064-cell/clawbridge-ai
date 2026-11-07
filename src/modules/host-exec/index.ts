@@ -30,6 +30,7 @@ import { sessionDir } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { requestApproval, registerApprovalHandler, registerApprovalRejectionHandler } from '../approvals/index.js';
 import { audit } from '../../audit.js';
+import { policyDecision } from '../../policies.js';
 
 const POLL_INTERVAL_MS = 250;
 
@@ -110,6 +111,76 @@ export function needsHostExecApproval(command: string): boolean {
     return false;
   }
   return !AUTO_APPROVED_PROGRAMS.has(program);
+}
+
+/** Programs that are never auto-allowed, whatever a saved rule says. */
+const NEVER_AUTO_ALLOW = new Set([
+  'rm',
+  'rmdir',
+  'mv',
+  'dd',
+  'mkfs',
+  'sudo',
+  'su',
+  'doas',
+  'kill',
+  'pkill',
+  'killall',
+  'shutdown',
+  'reboot',
+  'launchctl',
+  'systemctl',
+  'service',
+  'chmod',
+  'chown',
+  'curl',
+  'wget',
+  'ssh',
+  'scp',
+  'rsync',
+  'nc',
+  'ncat',
+  'eval',
+  'exec',
+  'sh',
+  'bash',
+  'zsh',
+  'python',
+  'python3',
+  'node',
+  'osascript',
+  'security',
+  'crontab',
+]);
+const NEVER_AUTO_ALLOW_GIT = new Set([
+  'push',
+  'reset',
+  'clean',
+  'rebase',
+  'checkout',
+  'restore',
+  'rm',
+  'filter-branch',
+  'gc',
+]);
+
+/**
+ * The rule scope an admin may "always allow" for this command (its first
+ * two words, e.g. "npm test"), or null when the command must always ask:
+ * chained or redirected shell, secret paths, or a risky program.
+ */
+export function alwaysAllowScope(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed || SHELL_OPERATORS.test(trimmed) || touchesSecretPath(trimmed)) return null;
+  const [program, sub] = trimmed.split(/\s+/);
+  if (NEVER_AUTO_ALLOW.has(program)) return null;
+  if (program === 'git' && (!sub || NEVER_AUTO_ALLOW_GIT.has(sub))) return null;
+  if (/^-/.test(sub ?? '')) return program;
+  return sub ? `${program} ${sub}` : program;
+}
+
+export function hostExecRisk(command: string): 'medium' | 'high' {
+  return alwaysAllowScope(command) === null ? 'high' : 'medium';
 }
 
 /** @deprecated use needsHostExecApproval — kept for callers of the old name. */
@@ -253,6 +324,15 @@ async function requestHostExecApproval(session: Session, req: ExecRequest, resPa
       responsePath: resPath,
     },
     title: 'Approve host terminal command?',
+    risk: hostExecRisk(req.command),
+    ...(alwaysAllowScope(req.command)
+      ? {
+          alwaysAllow: {
+            scope: alwaysAllowScope(req.command)!,
+            label: `Always allow \`${alwaysAllowScope(req.command)}\``.slice(0, 60),
+          },
+        }
+      : {}),
     question: [
       'A container agent wants to run this command on the HOST machine (outside its container).',
       'Only approve it if you understand exactly what it does.',
@@ -345,7 +425,20 @@ async function processRequest(
       return;
     }
 
-    if (needsHostExecApproval(req.command)) {
+    const rule = policyDecision(session.agent_group_id, 'host_exec', req.command);
+    if (rule === 'deny') {
+      log.warn('host_exec: rejected by a deny rule', { reqId: req.id });
+      audit('host_exec.denied', {
+        target: req.id,
+        agentGroupId: session.agent_group_id,
+        detail: { command: req.command, reason: 'deny_rule' },
+      });
+      writeAtomic(resPath, JSON.stringify(deniedResponse('host_exec is turned off for this agent (/permissions).')));
+      return;
+    }
+    const allowedByRule = rule === 'allow' && alwaysAllowScope(req.command) !== null;
+
+    if (!allowedByRule && needsHostExecApproval(req.command)) {
       log.info('host_exec: approval requested', {
         reqId: req.id,
         command: req.command,
@@ -366,7 +459,12 @@ async function processRequest(
     audit('host_exec.run', {
       target: req.id,
       agentGroupId: session.agent_group_id,
-      detail: { command: req.command, cwd: req.cwd ?? null, approved: false, exitCode: response.exitCode },
+      detail: {
+        command: req.command,
+        cwd: req.cwd ?? null,
+        approved: allowedByRule ? 'rule' : false,
+        exitCode: response.exitCode,
+      },
     });
     writeAtomic(resPath, JSON.stringify(response));
   } finally {

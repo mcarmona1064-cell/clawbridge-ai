@@ -108,3 +108,25 @@ describe('approval responses', () => {
     expect(getPendingApproval('a-6')?.status).toBe('pending');
   });
 });
+
+describe('always allow', () => {
+  it('approves the request and saves the rule it carries', async () => {
+    const { policyDecision } = await import('../../policies.js');
+    createPendingApproval({
+      approval_id: 'appr-always',
+      session_id: 's-1',
+      request_id: 'appr-always',
+      action: 'test_action',
+      payload: JSON.stringify({ x: 1, __alwaysAllow: { action: 'host_exec', scope: 'npm test' } }),
+      created_at: now(),
+      agent_group_id: 'ag-1',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      title: 'Test',
+      options_json: '[]',
+    });
+    await click('appr-always', 'UADMIN', 'approve_always');
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(getPendingApproval('appr-always')?.status).toBe('approved');
+    expect(policyDecision('ag-1', 'host_exec', 'npm test --watch')).toBe('allow');
+  });
+});

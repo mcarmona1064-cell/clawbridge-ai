@@ -24,6 +24,7 @@
 import { cardTtlMs, normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { identityIds, notifyUserIdFor } from '../../db/user-links.js';
+import { ALWAYS_ALLOW_VALUE, RISK_LABEL, type Risk } from '../../policies.js';
 import { createPendingApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -193,6 +194,24 @@ export interface RequestApprovalOptions {
   title: string;
   /** Card body shown to the admin. */
   question: string;
+  /** Shown as a badge on the card so the admin can judge at a glance. */
+  risk?: Risk;
+  /**
+   * Offer "Always allow …" on the card. Clicking it approves this request
+   * and saves an allow rule for `scope` of `action` (reviewable and
+   * revocable with /permissions). Omit for anything that must always ask.
+   */
+  alwaysAllow?: { scope: string; label: string };
+}
+
+/** Options for one approval card: Approve, [Always allow …], Reject. */
+export function approvalOptions(alwaysAllow?: { label: string }): RawOption[] {
+  if (!alwaysAllow) return APPROVAL_OPTIONS;
+  return [
+    APPROVAL_OPTIONS[0],
+    { label: alwaysAllow.label, selectedLabel: '✅ Approved, always allowed', value: ALWAYS_ALLOW_VALUE },
+    APPROVAL_OPTIONS[1],
+  ];
 }
 
 /** How long an approval card stays actionable. APPROVAL_TTL_HOURS overrides. */
@@ -205,7 +224,14 @@ export const approvalTtlMs = cardTtlMs;
  * approval handler for this action via the response dispatcher.
  */
 export async function requestApproval(opts: RequestApprovalOptions): Promise<boolean> {
-  const { session, action, payload, title, question, agentName } = opts;
+  const { session, action, agentName } = opts;
+  const options = approvalOptions(opts.alwaysAllow);
+  const title = opts.risk ? `${RISK_LABEL[opts.risk]} · ${opts.title}` : opts.title;
+  const question = opts.question;
+  // The rule to save if the admin picks "Always allow" travels with the request.
+  const payload = opts.alwaysAllow
+    ? { ...opts.payload, __alwaysAllow: { action, scope: opts.alwaysAllow.scope } }
+    : opts.payload;
 
   const approvers = pickApprover(session.agent_group_id);
   if (approvers.length === 0) {
@@ -224,7 +250,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<boo
   }
 
   const approvalId = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const normalizedOptions = normalizeOptions(APPROVAL_OPTIONS);
+  const normalizedOptions = normalizeOptions(options);
   const createdAt = new Date();
   createPendingApproval({
     approval_id: approvalId,
@@ -254,7 +280,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<boo
           questionId: approvalId,
           title,
           question,
-          options: APPROVAL_OPTIONS,
+          options,
         }),
       );
     } catch (err) {

@@ -105,6 +105,11 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/permissions': {
+        const { permissionsCommand } = await import('./permissions-cmd.js');
+        write(permissionsCommand(ctx.agentGroup.id, ctx.userId, ctx.args));
+        return;
+      }
       case '/usage': {
         const { usageCommand } = await import('../usage/index.js');
         write(usageCommand(ctx.agentGroup.id));

@@ -24,6 +24,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { hasAdminPrivilege } from '../permissions/db/user-roles.js';
 import { getApprovalHandler, getApprovalRejectionHandler } from './primitive.js';
+import { ALWAYS_ALLOW_VALUE, setPolicy } from '../../policies.js';
 
 /**
  * Namespaced id of whoever responded. Card clicks arrive with the raw
@@ -124,6 +125,13 @@ async function handleRegisteredApproval(
   }
 
   const notify = notifierFor(session);
+
+  // "Always allow …": save the rule, then handle it as a normal approval.
+  if (selectedOption === ALWAYS_ALLOW_VALUE) {
+    const rule = (JSON.parse(approval.payload) as { __alwaysAllow?: { action: string; scope: string } }).__alwaysAllow;
+    if (rule && approval.agent_group_id) setPolicy(approval.agent_group_id, rule.action, rule.scope, 'allow', userId);
+    selectedOption = 'approve';
+  }
 
   if (selectedOption !== 'approve') {
     const rejectionHandler = getApprovalRejectionHandler(approval.action);
