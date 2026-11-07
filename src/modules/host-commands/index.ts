@@ -105,6 +105,25 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/voice': {
+        const { setVoiceReplies, ttsConfig, voiceRepliesOn } = await import('../../voice-replies.js');
+        const want = ctx.args.trim().toLowerCase();
+        if (want !== 'on' && want !== 'off') {
+          write(
+            `Voice replies are ${voiceRepliesOn(ctx.session.id) ? 'on' : 'off'} here. /voice on answers your voice notes with a voice note too.`,
+          );
+          return;
+        }
+        setVoiceReplies(ctx.session.id, want === 'on');
+        write(
+          want === 'off'
+            ? 'Voice replies off.'
+            : ttsConfig()
+              ? "Voice replies on: when you send a voice note, I'll answer with one too (and the text)."
+              : 'Voice replies on, but no speech provider is set up yet, so replies stay text. An admin can add TTS_PROVIDER=openai and OPENAI_API_KEY on the host.',
+        );
+        return;
+      }
       case '/skills': {
         const { skillsCommand } = await import('../skills/index.js');
         write(await skillsCommand({ session: ctx.session, userId: ctx.userId, args: ctx.args }));

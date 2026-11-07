@@ -27,6 +27,7 @@ import { migration020 } from './020-engage-log.js';
 import { migration021 } from './021-usage.js';
 import { migration022 } from './022-tool-policies.js';
 import { migration023 } from './023-session-prefs.js';
+import { migration024 } from './024-voice-replies.js';
 
 export interface Migration {
   version: number;
@@ -61,6 +62,7 @@ const migrations: Migration[] = [
   migration021,
   migration022,
   migration023,
+  migration024,
 ];
 
 export function runMigrations(db: Database.Database): void {

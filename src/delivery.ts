@@ -31,6 +31,7 @@ import type { Session } from './types.js';
 import { audit } from './audit.js';
 import { rewriteAgentError } from './friendly-errors.js';
 import { gateClaims, recordSessionAction } from './claim-gate.js';
+import { lastWasVoice, synthesize, voiceRepliesOn } from './voice-replies.js';
 import { sendAdminAlert } from './shared/admin-alert.js';
 
 function extractText(jsonContent: string): string {
@@ -435,10 +436,26 @@ async function deliverMessage(
   // Read file attachments from outbox if the content declares files.
   // File I/O lives in session-manager.ts (symmetric with inbound
   // extractAttachmentFiles) — delivery just hands buffers to the adapter.
-  const files =
+  let files =
     Array.isArray(content.files) && content.files.length > 0
       ? readOutboxFiles(session.agent_group_id, session.id, msg.id, content.files as string[])
       : undefined;
+
+  // Voice replies (opt-in): answer a voice note with a voice note as well as text.
+  if (
+    msg.kind === 'chat' &&
+    typeof content.text === 'string' &&
+    !content.operation &&
+    !content.agentError &&
+    voiceRepliesOn(session.id) &&
+    lastWasVoice(getLatestInboundChatContent(inDb))
+  ) {
+    const audio = await synthesize(content.text).catch((err) => {
+      log.warn('Voice reply failed; sending text only', { err });
+      return null;
+    });
+    if (audio) files = [...(files ?? []), { filename: 'reply.ogg', data: audio }];
+  }
 
   // Agent errors: a plain-language message for the person, details for the admin.
   let outboundContent = msg.content;
