@@ -33,6 +33,7 @@ import type { ChannelAdapter, ChannelSetup, InboundFile, InboundMessage, Outboun
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import { resolveChoiceValue, SeenSet } from './render.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { SlackSocketMode } from './slack-socket.js';
 import { isAudioLike, transcribeAudio } from '../transcription.js';
 
 const CHANNEL_TYPE = 'slack';
@@ -185,10 +186,13 @@ export const resolveSlackOption = resolveChoiceValue;
 export { SeenSet };
 
 function createAdapter(): ChannelAdapter | null {
-  const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET']);
+  const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN']);
   const token = env['SLACK_BOT_TOKEN'];
   const signingSecret = env['SLACK_SIGNING_SECRET'];
-  if (!token || !signingSecret) return null;
+  // Socket Mode (app-level token) needs no public URL and no signing secret.
+  const appToken = env['SLACK_APP_TOKEN'];
+  if (!token || (!signingSecret && !appToken)) return null;
+  let socket: SlackSocketMode | null = null;
 
   let cfg: ChannelSetup | null = null;
   let botUserId: string | null = null;
@@ -201,7 +205,7 @@ function createAdapter(): ChannelAdapter | null {
   async function verifySignature(req: Request, body: string): Promise<boolean> {
     const ts = req.headers.get('x-slack-request-timestamp');
     const sig = req.headers.get('x-slack-signature');
-    if (!ts || !sig) return false;
+    if (!ts || !sig || !signingSecret) return false;
     if (Math.abs(Date.now() / 1000 - parseInt(ts, 10)) > 300) return false;
     const hmac = crypto.createHmac('sha256', signingSecret).update(`v0:${ts}:${body}`).digest('hex');
     try {
@@ -327,6 +331,16 @@ function createAdapter(): ChannelAdapter | null {
     }
   }
 
+  /** An Events API body (webhook or Socket Mode): dedupe by event_id, then handle in the background. */
+  function dispatchEvents(payload: Record<string, unknown>): void {
+    if (payload['type'] !== 'event_callback') return;
+    // Slack re-sends events it thinks we missed; process each event_id once.
+    const eventId = payload['event_id'] as string | undefined;
+    if (eventId && seen.checkAndAdd(`evt:${eventId}`)) return;
+    const event = payload['event'] as Record<string, unknown> | undefined;
+    if (event) void handleEvent(event).catch((err) => log.error('[slack] event handling failed', { err }));
+  }
+
   /** Process an interactivity payload (button clicks). */
   async function handleInteraction(payload: Record<string, unknown>): Promise<void> {
     if (payload['type'] !== 'block_actions' || !cfg) return;
@@ -428,27 +442,32 @@ function createAdapter(): ChannelAdapter | null {
           });
         }
 
-        if (payload['type'] === 'event_callback') {
-          // Slack re-sends events it thinks we missed; process each event_id once.
-          const eventId = payload['event_id'] as string | undefined;
-          if (eventId && seen.checkAndAdd(`evt:${eventId}`)) return new Response('OK');
-          const event = payload['event'] as Record<string, unknown> | undefined;
-          // Ack now; Slack retries anything not acknowledged within 3 seconds.
-          if (event) void handleEvent(event).catch((err) => log.error('[slack] event handling failed', { err }));
-        }
-
+        // Ack now; Slack retries anything not acknowledged within 3 seconds.
+        dispatchEvents(payload);
         return new Response('OK');
       });
 
+      if (appToken) {
+        socket = new SlackSocketMode(appToken, {
+          onEvents: dispatchEvents,
+          onInteractive: (payload) =>
+            void handleInteraction(payload).catch((err) => log.error('[slack] interaction failed', { err })),
+        });
+        await socket.start();
+        log.info('[slack] Using Socket Mode — no public URL needed');
+      } else {
+        log.info('[slack] Webhook handler ready — set Slack Event and Interactivity URLs to /webhook/slack');
+      }
       connected = true;
-      log.info('[slack] Webhook handler ready — set Slack Event and Interactivity URLs to /webhook/slack');
     },
 
     async teardown() {
       connected = false;
+      socket?.stop();
+      socket = null;
     },
 
-    isConnected: () => connected,
+    isConnected: () => connected && (socket ? socket.connected : true),
 
     async deliver(platformId: string, threadId: string | null, message: OutboundMessage) {
       const channelId = platformId.startsWith(`${CHANNEL_TYPE}:`)

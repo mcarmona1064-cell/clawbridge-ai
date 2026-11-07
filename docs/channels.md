@@ -20,7 +20,7 @@ First-class channels: **Slack, WhatsApp (Meta Cloud API), Telegram and Discord**
 | Files out | ✅ | ✅ image/video/audio/document | ✅ photo/video/voice/audio/document | ✅ (10 per message) | adapter-dependent |
 | Voice notes in | ✅ transcribed | ✅ transcribed | ✅ transcribed | ✅ transcribed | adapter-dependent |
 | Native commands menu | ✅ | — | ✅ (`setMyCommands`) | (planned) | — |
-| Needs a public URL | yes (Events API), Socket Mode planned | yes (Meta webhook) | **no** (long polling) | **no** (gateway) | adapter-dependent |
+| Needs a public URL | **no** with Socket Mode (`SLACK_APP_TOKEN`), yes for webhooks | yes (Meta webhook) | **no** (long polling) | **no** (gateway) | adapter-dependent |
 | Reply window | none | **24 h** after the user's last message, templates outside it | none | none | none |
 
 ## Fallbacks
@@ -51,7 +51,10 @@ Linking commands work before access checks, so a new account can link itself. Co
 
 ## Channel notes
 
-- **Slack.** See `setup/channels/slack-app-manifest.json`, which lists exactly the scopes the adapter uses. Buttons need Interactivity turned on.
+- **Slack.**
+  - Create the app from `setup/channels/slack-app-manifest.json`. It turns on Socket Mode and lists exactly the scopes the adapter uses.
+  - Under Basic Information → App-Level Tokens, create a token with `connections:write` and set it as `SLACK_APP_TOKEN`. Socket Mode needs no public URL and no signing secret.
+  - Webhook mode (`SLACK_SIGNING_SECRET` with Event and Interactivity URLs pointing at `/webhook/slack`) still works.
 - **WhatsApp rules.**
   - Within 24 hours of the person's last message, the agent can reply freely. After that, WhatsApp only accepts pre-approved templates.
   - Set `WHATSAPP_TEMPLATE_NAME` (and `WHATSAPP_TEMPLATE_LANG`) to a **utility** template with one body variable, for example "Update from your assistant: {{1}}". Late messages, scheduled results and digests are then sent through it.
