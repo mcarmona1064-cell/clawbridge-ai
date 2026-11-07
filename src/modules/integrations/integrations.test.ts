@@ -185,3 +185,53 @@ describe('integrations', () => {
     expect(calls.filter((c) => c.url.includes('oauth2.googleapis.com'))).toHaveLength(1);
   });
 });
+
+describe('integration receipts', () => {
+  beforeEach(() => {
+    runMigrations(initTestDb());
+    calls.length = 0;
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-int-'));
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ id: 42, html_url: 'https://github.com/acme/web/issues/42' }), {
+        status: 201,
+      });
+    });
+  });
+  afterEach(() => {
+    closeDb();
+    vi.unstubAllGlobals();
+  });
+
+  it('returns evidence and does not repeat an identical allowed write', async () => {
+    // A different body from earlier tests: identical writes are remembered for ten minutes.
+    const req = {
+      id: 'i1',
+      integration: 'github',
+      method: 'POST',
+      path: '/repos/acme/web/issues',
+      body: { title: 'Receipt test' },
+    };
+    setPolicy('ag-1', 'integration', ruleSubject(req), 'allow', 'slack:U1');
+    await processIntegrationRequest(session, req, path.join(tmp, 'a.json'), availableIntegrations(env));
+    await processIntegrationRequest(
+      session,
+      { ...req, id: 'i2' },
+      path.join(tmp, 'b.json'),
+      availableIntegrations(env),
+    );
+    expect(calls).toHaveLength(1);
+    expect(readResponse(path.join(tmp, 'a.json'))).toMatchObject({ evidence: 'https://github.com/acme/web/issues/42' });
+    expect(readResponse(path.join(tmp, 'b.json'))).toMatchObject({ note: expect.stringContaining('not repeated') });
+  });
+
+  it('sends Stripe a stable Idempotency-Key', async () => {
+    const [stripe] = availableIntegrations(env).filter((i) => i.def.name === 'stripe');
+    const req = { id: 'x', integration: 'stripe', method: 'POST', path: '/v1/refunds', body: { charge: 'ch_1' } };
+    await executeIntegration(stripe, req);
+    await executeIntegration(stripe, { ...req, id: 'y' });
+    const keys = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(keys[0]).toMatch(/^[0-9a-f]{40}$/);
+    expect(keys[1]).toBe(keys[0]);
+  });
+});

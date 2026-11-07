@@ -1,6 +1,8 @@
 /**
  * Run one integration request on the host, with the real credentials.
  */
+import { createHash } from 'crypto';
+
 import type { ResolvedIntegration } from './registry.js';
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -108,6 +110,9 @@ export async function executeIntegration(
   const url = buildUrl(r.baseUrl, req.path, req.query);
   const method = req.method.toUpperCase();
   const headers: Record<string, string> = { ...(r.def.headers ?? {}), ...(await authHeaders(r, fetchImpl)) };
+  // Stripe deduplicates retried writes itself when given a stable key.
+  if (r.def.name === 'stripe' && method !== 'GET' && method !== 'HEAD')
+    headers['Idempotency-Key'] = idempotencyKey(req);
   let body: string | undefined;
   if (req.body !== undefined && method !== 'GET' && method !== 'HEAD') {
     if (r.def.name === 'stripe') {
@@ -127,4 +132,32 @@ export async function executeIntegration(
     body: text.length > MAX_BODY ? text.slice(0, MAX_BODY) : text,
     truncated: text.length > MAX_BODY,
   };
+}
+
+/** Same request content → same key (method, path, query and body). */
+export function idempotencyKey(req: IntegrationRequest): string {
+  const canonical = JSON.stringify([
+    req.integration,
+    req.method.toUpperCase(),
+    req.path,
+    req.query ?? null,
+    req.body ?? null,
+  ]);
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 40);
+}
+
+/** A link or id that proves the change happened (html_url, url, permalink or id in the response). */
+export function evidenceOf(result: IntegrationResult): string | null {
+  if (result.status >= 400) return null;
+  try {
+    const body = JSON.parse(result.body) as Record<string, unknown>;
+    const pick = (o: Record<string, unknown>) =>
+      (['html_url', 'permalink', 'url', 'webViewLink', 'htmlLink'] as const)
+        .map((k) => o[k])
+        .find((v) => typeof v === 'string') ??
+      (typeof o.id === 'string' || typeof o.id === 'number' ? `id ${o.id}` : null);
+    return (pick(body) as string | null) ?? null;
+  } catch {
+    return null;
+  }
 }

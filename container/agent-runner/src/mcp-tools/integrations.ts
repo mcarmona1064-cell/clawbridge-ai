@@ -99,11 +99,13 @@ export const integrationRequest: McpToolDefinition = {
             truncated?: boolean;
             error?: string;
             note?: string;
+            evidence?: string;
           };
           fs.unlinkSync(resPath);
           if (res.status === 'done') {
+            const head = `HTTP ${res.httpStatus}${res.evidence ? `\nEvidence: ${res.evidence}` : ''}${res.note ? `\n${res.note}` : ''}`;
             return text(
-              `HTTP ${res.httpStatus}\n${res.body ?? ''}${res.truncated ? '\n[truncated]' : ''}`,
+              `${head}\n${res.body ?? ''}${res.truncated ? '\n[truncated]' : ''}`,
               (res.httpStatus ?? 500) >= 400,
             );
           }

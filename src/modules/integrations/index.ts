@@ -28,10 +28,19 @@ import {
   registerApprovalRejectionHandler,
   requestApproval,
 } from '../approvals/index.js';
-import { executeIntegration, pathTemplate, type IntegrationRequest, type IntegrationResult } from './execute.js';
+import {
+  evidenceOf,
+  executeIntegration,
+  idempotencyKey,
+  pathTemplate,
+  type IntegrationRequest,
+  type IntegrationResult,
+} from './execute.js';
 import { availableIntegrations, isWriteRequest, type ResolvedIntegration } from './registry.js';
 
 const POLL_MS = 300;
+const IDEMPOTENCY_MS = 10 * 60 * 1000;
+const recentWrites = new Map<string, { at: number; result: IntegrationResult }>();
 
 function writeAtomic(file: string, data: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -56,7 +65,15 @@ function respond(resPath: string, payload: Record<string, unknown>): void {
 }
 
 function resultPayload(r: IntegrationResult): Record<string, unknown> {
-  return { status: 'done', httpStatus: r.status, contentType: r.contentType, body: r.body, truncated: r.truncated };
+  const evidence = evidenceOf(r);
+  return {
+    status: 'done',
+    httpStatus: r.status,
+    contentType: r.contentType,
+    body: r.body,
+    truncated: r.truncated,
+    ...(evidence ? { evidence } : {}),
+  };
 }
 
 /** Subject used for allow/deny rules: "<integration> <METHOD> <path template>". */
@@ -94,8 +111,16 @@ export async function processIntegrationRequest(
     write && !target.def.alwaysAsk && policyDecision(session.agent_group_id, 'integration', subject) === 'allow';
 
   if (!write || allowedByRule) {
+    // The same write repeated within ten minutes returns the first result instead of running twice.
+    const key = write ? `${session.id}:${idempotencyKey(r)}` : null;
+    const previous = key ? recentWrites.get(key) : undefined;
+    if (previous && Date.now() - previous.at < IDEMPOTENCY_MS) {
+      respond(resPath, { ...resultPayload(previous.result), note: 'Already done a moment ago; not repeated.' });
+      return;
+    }
     try {
       const result = await executeIntegration(target, r);
+      if (key && result.status < 400) recentWrites.set(key, { at: Date.now(), result });
       if (write) {
         audit('integration.write', {
           agentGroupId: session.agent_group_id,
@@ -147,8 +172,9 @@ registerApprovalHandler('integration_write', async ({ payload, notify }) => {
   if (!target) throw new Error(`${req.integration} is no longer configured`);
   const result = await executeIntegration(target, req);
   audit('integration.write', { target: ruleSubject(req), detail: { httpStatus: result.status, approved: 'card' } });
+  const evidence = evidenceOf(result);
   notify(
-    `Approved and sent: ${req.method} ${req.path} → HTTP ${result.status}\n${result.body.slice(0, 1500)}${result.truncated || result.body.length > 1500 ? '\n…' : ''}`,
+    `Approved and sent: ${req.method} ${req.path} → HTTP ${result.status}${evidence ? `\nEvidence: ${evidence}` : ''}\n${result.body.slice(0, 1500)}${result.truncated || result.body.length > 1500 ? '\n…' : ''}`,
   );
 });
 
