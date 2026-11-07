@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDefaultContainerImage } from './install-slug.js';
 import { AGENT_PROVIDER } from './config.js';
+import { checkSlackAppToken } from './channels/credential-checks.js';
 
 // ─── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -730,6 +731,23 @@ async function checkSlack(env: Map<string, string>, autoFix: boolean): Promise<v
     const data = (await res.json()) as { ok: boolean; bot_id?: string; team?: string; error?: string };
     if (data.ok) {
       pass('Slack', `${data.team ?? ''} (bot_id: ${data.bot_id ?? 'unknown'})`);
+      const appToken = env.get('SLACK_APP_TOKEN');
+      if (appToken) {
+        const socket = await checkSlackAppToken(appToken).catch(
+          (e: Error) =>
+            ({ ok: false, problem: `unreachable (${e.message})`, fix: 'check internet connection' }) as const,
+        );
+        if (socket.ok) pass('Slack Socket Mode', socket.detail);
+        else fail('Slack Socket Mode', socket.problem, socket.fix);
+      } else if (!env.get('SLACK_SIGNING_SECRET')) {
+        fail(
+          'Slack inbound',
+          'no way to receive messages',
+          'add SLACK_APP_TOKEN (Socket Mode, recommended: Basic Information → App-Level Tokens, scope connections:write) or SLACK_SIGNING_SECRET for webhooks',
+        );
+      } else {
+        pass('Slack inbound', 'webhook mode — Event and Interactivity URLs must point at /webhook/slack');
+      }
     } else {
       fail('Slack', `auth failed: ${data.error ?? 'unknown'}`, 'check SLACK_BOT_TOKEN in ~/.clawbridge/.env');
       if (autoFix) {
@@ -751,6 +769,7 @@ async function checkChannels(env: Map<string, string>, autoFix: boolean): Promis
     'DISCORD_TOKEN',
     'DISCORD_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
     'WHATSAPP_PHONE_NUMBER_ID',
     'WHATSAPP_ACCESS_TOKEN',
   ].some((k) => env.get(k));

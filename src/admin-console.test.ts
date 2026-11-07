@@ -52,7 +52,7 @@ describe('admin console', () => {
     expect(html).toContain('Ava &lt;script&gt;');
     expect(html).not.toContain('<script>');
     expect(html).toContain('role.granted');
-    const json = await (await get('?token=secret-token-123&format=json')).json();
+    const json = (await (await get('?token=secret-token-123&format=json')).json()) as { channels: unknown };
     expect(json.channels).toEqual([{ type: 'slack', connected: true }]);
   });
 });
