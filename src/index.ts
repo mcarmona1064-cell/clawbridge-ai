@@ -373,6 +373,8 @@ async function main(): Promise<void> {
     startIntegrationsWatcher();
     const { startShareService } = await import('./modules/share/index.js');
     startShareService();
+    const { startHandoffService } = await import('./modules/handoff/index.js');
+    startHandoffService();
   }
 
   // 7. Start health monitoring

@@ -90,7 +90,7 @@ export function digestCommand(opts: {
     first.setHours(t.hour, t.minute, 0, 0);
     if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
     insertTask(db, {
-      id: `${prefix}-${Date.now()}`,
+      id: `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       processAfter: first.toISOString(),
       recurrence,
       platformId: opts.platformId,
