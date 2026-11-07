@@ -68,9 +68,24 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credentials
 
-**What reaches a container.** Provider credentials are injected at spawn time so the agent CLI can call its model:
-- **Claude:** the `ANTHROPIC_API_KEY` from `~/.clawbridge/.env` (or a legacy `CLAUDE_CODE_OAUTH_TOKEN`), passed with `-e` to `docker run`. It is in the container's environment, so code the agent runs can read it.
-- **Codex:** `~/.codex/auth.json` (including its refresh token) is copied into the group's `.codex-shared/` state dir, which is mounted read-write at `/home/node/.codex`.
+**What reaches a container.** Provider credentials reach a container in one of two ways.
+
+- **Credential proxy (recommended):** set `CREDENTIAL_PROXY=on` in `~/.clawbridge/.env`.
+  - The real Claude credential (subscription token or API key) stays in the host process.
+  - Each container gets a per-session placeholder (`cbp_…`), with `ANTHROPIC_BASE_URL` pointing at the host proxy (`src/credential-proxy.ts`).
+  - The proxy accepts a placeholder only for the API it was issued for, swaps in the real credential, and streams the reply.
+  - Placeholders are revoked when the container exits. A copied placeholder is useless anywhere else.
+- **Direct (default until the proxy has been checked live):** the credential is passed with `-e` to `docker run`, so code the agent runs can read it.
+  - **Claude:** the subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) or `ANTHROPIC_API_KEY` from `~/.clawbridge/.env`.
+- **Codex** (either way): `~/.codex/auth.json`, including its refresh token, is copied into the group's `.codex-shared/` state dir, which is mounted read-write at `/home/node/.codex`.
+  - Codex refreshes and rewrites this file itself, so it is not proxied yet.
+  - Each group gets its own copy; the host's own file is never mounted.
+
+**Outbound traffic.** With `EGRESS_PROXY=on`, every other HTTPS request from a container goes through the same host proxy (`HTTPS_PROXY`, CONNECT tunnels authenticated by the session placeholder).
+- The proxy refuses private, loopback, link-local and cloud-metadata addresses (for example `169.254.169.254` and the host's LAN).
+- With `EGRESS_ALLOWLIST=github.com,pypi.org,…` set, it refuses any other host.
+- Refusals are written to the audit log (`egress.blocked`).
+- **Limit:** a process inside the container that ignores `HTTPS_PROXY` can still open direct connections. Network-level lockdown (an internal Docker network whose only route out is the proxy) is the next step.
 
 **What never reaches a container:**
 - `~/.clawbridge/.env` itself, channel tokens (Slack, Telegram, …), Hindsight credentials, and the integration server's secrets — host only
@@ -79,7 +94,10 @@ Messages and task operations are verified against group identity:
 - Anything matching the blocked mount patterns above
 - Scheduled-task pre-scripts run with provider credentials and other `*_API_KEY` / `*_TOKEN` / `*_SECRET` variables stripped from their environment
 
-**Known limitation.** Because the provider credential is inside the container and outbound network access is unrestricted, a prompt-injected agent could read and send it elsewhere. The planned fix is a host egress proxy that holds the real secrets, gives containers only placeholders, and injects credentials per request for each credential's allowed hosts (product spec §16). Until then, use a dedicated API key with a spend limit for ClawBridge, and rotate it if an agent may have been compromised.
+**Known limitations:**
+- Without `CREDENTIAL_PROXY=on`, a prompt-injected agent could read the Claude credential and send it elsewhere.
+- The Codex `auth.json` is readable inside the container in every mode.
+- Use a dedicated key or subscription seat for ClawBridge, and rotate it if an agent may have been compromised.
 
 ### 6. Host Commands (`host_exec`)
 

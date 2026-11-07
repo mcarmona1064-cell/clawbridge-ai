@@ -15,6 +15,7 @@ import { resolveClaudeCredential } from '../claude-cli.js';
 import { log } from '../log.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 import { providerStateDir } from './state-dir.js';
+import { proxiedCredentialEnv } from '../credential-proxy.js';
 
 const DEFAULT_SETTINGS_JSON =
   JSON.stringify(
@@ -29,7 +30,7 @@ const DEFAULT_SETTINGS_JSON =
     2,
   ) + '\n';
 
-registerProviderContainerConfig('claude', ({ agentGroupId, hostEnv }) => {
+registerProviderContainerConfig('claude', ({ agentGroupId, hostEnv, sessionDir }) => {
   const claudeDir = providerStateDir(agentGroupId, 'claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   const settingsFile = path.join(claudeDir, 'settings.json');
@@ -44,5 +45,8 @@ registerProviderContainerConfig('claude', ({ agentGroupId, hostEnv }) => {
     });
     return {};
   }
-  return { env: { [credential.key]: credential.value } };
+  // With the credential proxy on, the container gets a per-session
+  // placeholder and the real token stays on the host.
+  const proxied = proxiedCredentialEnv(path.basename(sessionDir), credential);
+  return { env: proxied ?? { [credential.key]: credential.value } };
 });

@@ -17,6 +17,7 @@ import path from 'path';
 
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 import { providerStateDir } from './state-dir.js';
+import { proxiedCredentialEnv } from '../credential-proxy.js';
 
 function syncCodexOAuthAuth(codexDir: string): void {
   const hostAuth = path.join(os.homedir(), '.codex', 'auth.json');
@@ -39,13 +40,14 @@ function syncCodexOAuthAuth(codexDir: string): void {
   }
 }
 
-registerProviderContainerConfig('codex', ({ agentGroupId }) => {
+registerProviderContainerConfig('codex', ({ agentGroupId, sessionDir }) => {
   const codexDir = providerStateDir(agentGroupId, 'codex');
   fs.mkdirSync(codexDir, { recursive: true });
   syncCodexOAuthAuth(codexDir);
 
-  // No env passthrough — Codex reads its own OAuth token from ~/.codex/,
+  // No credential env — Codex reads its own OAuth token from ~/.codex/,
   // which container-runner bind-mounts from codexDir. Explicitly do NOT
-  // forward OPENAI_API_KEY.
-  return {};
+  // forward OPENAI_API_KEY. With EGRESS_PROXY=on, only the proxy env is added.
+  const proxied = proxiedCredentialEnv(path.basename(sessionDir), null);
+  return proxied && Object.keys(proxied).length > 0 ? { env: proxied } : {};
 });

@@ -44,6 +44,7 @@ import {
   writeSessionRouting,
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
+import { revokeSessionCredentials } from './credential-proxy.js';
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -201,6 +202,7 @@ async function spawnContainer(session: Session): Promise<void> {
 
   container.on('close', (code) => {
     activeContainers.delete(session.id);
+    revokeSessionCredentials(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
     log.info('Container exited', { sessionId: session.id, code, containerName });

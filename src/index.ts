@@ -274,6 +274,15 @@ async function main(): Promise<void> {
   startSweepDeliveryPoll();
   log.info('Delivery polls started');
 
+  // 5b. Credential proxy (opt-in: CREDENTIAL_PROXY=on / EGRESS_PROXY=on).
+  {
+    const { PROXY_ENV_KEYS, startCredentialProxy } = await import('./credential-proxy.js');
+    const { readEnvFile } = await import('./env.js');
+    await startCredentialProxy({ ...readEnvFile([...PROXY_ENV_KEYS]), ...process.env }).catch((err) =>
+      log.error('Credential proxy failed to start; containers get credentials directly', { err }),
+    );
+  }
+
   // 6. Start host sweep
   startHostSweep();
   log.info('Host sweep started');

@@ -162,8 +162,11 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
         'setup/verify.ts',
         'setup/probe.sh',
         'container/agent-runner/src/providers/claude.ts', // Claude Code env tuning (CLAUDE_CODE_*)
+        'src/credential-proxy.ts', // swaps container placeholders for the real credential
       ].map((rel) => path.join(ROOT, rel)),
     );
+    // The proxy forwards containers' own API calls upstream; nothing else may call the API.
+    const forwardsToApi = new Set([path.join(ROOT, 'src/credential-proxy.ts')]);
     const credentialPattern = /ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|sk-ant|CLAUDE_CODE_/;
     const directApi = /api\.anthropic\.com/;
 
@@ -178,6 +181,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
       .filter((file) => credentialPattern.test(fs.readFileSync(file, 'utf8')))
       .map((file) => path.relative(ROOT, file));
     const directApiOffenders = files
+      .filter((file) => !forwardsToApi.has(file))
       .filter((file) => directApi.test(fs.readFileSync(file, 'utf8')))
       .map((file) => path.relative(ROOT, file));
 
