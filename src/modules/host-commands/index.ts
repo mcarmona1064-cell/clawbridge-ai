@@ -105,6 +105,21 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         );
         return;
       }
+      case '/digest': {
+        const { digestCommand } = await import('./digest-cmd.js');
+        write(
+          digestCommand({
+            session: ctx.session,
+            userId: ctx.userId,
+            isGroup: ctx.mg.is_group === 1,
+            args: ctx.args,
+            channelType: ctx.deliveryAddr.channelType,
+            platformId: ctx.deliveryAddr.platformId,
+            threadId: ctx.deliveryAddr.threadId,
+          }),
+        );
+        return;
+      }
       case '/model': {
         const { PRESETS, PRESET_TEXT, defaultPreset, getSessionPreset, parsePreset, setSessionPreset } =
           await import('../../model-presets.js');

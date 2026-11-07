@@ -443,6 +443,12 @@ async function deliverMessage(
   // Agent errors: a plain-language message for the person, details for the admin.
   let outboundContent = msg.content;
 
+  // A digest with nothing new is not posted (no noise on quiet days).
+  if (msg.kind === 'chat' && typeof content.text === 'string' && content.text.trim() === 'NO_DIGEST') {
+    log.info('Digest had nothing new; not posted', { id: msg.id, sessionId: session.id });
+    return undefined;
+  }
+
   // A reply that claims a host action (scheduled, saved, posted) with no
   // matching action on record gets an honest correction appended.
   if (msg.kind === 'chat' && typeof content.text === 'string' && !content.operation && !content.agentError) {
