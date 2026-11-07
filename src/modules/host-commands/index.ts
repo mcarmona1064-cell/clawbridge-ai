@@ -19,6 +19,7 @@ import { notifyAgent } from '../approvals/index.js';
 import { saveTeamFact, validateTeamFact } from '../team-memory/index.js';
 import { dispatchResponse } from '../../response-registry.js';
 import type { InboundEvent } from '../../channels/adapter.js';
+import { getChannelAdapter } from '../../channels/channel-registry.js';
 import { buildHomeSummary, homeSummaryMarkdown, setTaskCounter } from '../../home-summary.js';
 import { listTasks } from './help-tasks.js';
 
@@ -88,6 +89,20 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
           text: '',
         });
         if (reply) write(reply);
+        return;
+      }
+      case '/reply': {
+        const { replyModeCommand } = await import('./reply-mode.js');
+        write(
+          replyModeCommand({
+            agentGroupId: ctx.agentGroup.id,
+            messagingGroupId: ctx.mg.id,
+            isGroup: ctx.mg.is_group === 1,
+            userId: ctx.userId,
+            args: ctx.args,
+            supportsThreads: getChannelAdapter(ctx.mg.channel_type)?.supportsThreads === true,
+          }),
+        );
         return;
       }
       case '/connect':
