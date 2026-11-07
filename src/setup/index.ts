@@ -222,6 +222,10 @@ function buildEnvFile(cfg: FreshConfig, existingEnv?: Map<string, string>): stri
       '',
     );
   }
+  // Any other checked channel settings (Signal, iMessage, email, …).
+  const written = new Set(lines.map((l) => l.split('=')[0]));
+  const extra = Object.entries(ce).filter(([k]) => !written.has(k));
+  if (extra.length) lines.push('# More channels', ...extra.map(([k, v]) => `${k}=${v}`), '');
   lines.push(
     '# Keep the Claude credential on the host; containers get a placeholder.',
     `CREDENTIAL_PROXY=${existingEnv?.get('CREDENTIAL_PROXY') ?? 'on'}`,
@@ -609,6 +613,9 @@ async function runFreshInstall(): Promise<void> {
     { value: 'slack', label: 'Slack', hint: 'one-click app, no public URL' },
     { value: 'whatsapp', label: 'WhatsApp', hint: 'official Business API' },
     { value: 'discord', label: 'Discord' },
+    { value: 'signal', label: 'Signal', hint: 'needs signal-cli' },
+    ...(process.platform === 'darwin' ? [{ value: 'imessage', label: 'iMessage', hint: 'this Mac' }] : []),
+    { value: 'email', label: 'Email', hint: 'via Postmark' },
     { value: 'gmail', label: 'Gmail' },
   ];
   const channelChoices = ensure(
@@ -628,7 +635,7 @@ async function runFreshInstall(): Promise<void> {
     if (out) {
       Object.assign(channelEnv, out.env);
       nextSteps.push(...out.next);
-    } else if (['telegram', 'slack', 'whatsapp', 'discord'].includes(channel)) {
+    } else if (['telegram', 'slack', 'whatsapp', 'discord', 'signal', 'imessage', 'email'].includes(channel)) {
       p.log.warn(`${channel} skipped — add it later with: clawbridge-ai`);
     }
   }

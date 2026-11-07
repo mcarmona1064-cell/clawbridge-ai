@@ -162,3 +162,104 @@ export async function checkTelegramToken(token: string, fetchImpl: FetchLike = f
   }
   return { ok: true, detail: `@${body.result?.username}` };
 }
+
+// ── Signal (signal-cli JSON-RPC daemon) ──
+
+export async function checkSignalDaemon(address: string, account: string): Promise<CheckResult> {
+  const [host, portStr] = address.split(':');
+  const port = Number(portStr) || 7583;
+  const net = await import('net');
+  return new Promise((resolve) => {
+    const sock = net.connect(port, host || '127.0.0.1');
+    const done = (r: CheckResult) => {
+      sock.destroy();
+      resolve(r);
+    };
+    const timer = setTimeout(
+      () =>
+        done({
+          ok: false,
+          problem: 'signal-cli did not answer.',
+          fix: `Start it: signal-cli -a ${account} daemon --tcp ${host || '127.0.0.1'}:${port}`,
+        }),
+      5000,
+    );
+    sock.on('error', () => {
+      clearTimeout(timer);
+      done({
+        ok: false,
+        problem: `Nothing is listening on ${address}.`,
+        fix: `Start the daemon: signal-cli -a ${account} daemon --tcp ${host || '127.0.0.1'}:${port}`,
+      });
+    });
+    sock.on('connect', () =>
+      sock.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'version', params: {}, id: 1 })}\n`),
+    );
+    sock.setEncoding('utf8');
+    let buf = '';
+    sock.on('data', (chunk: string) => {
+      buf += chunk;
+      if (!buf.includes('\n')) return;
+      clearTimeout(timer);
+      try {
+        const msg = JSON.parse(buf.split('\n')[0]) as { result?: { version?: string } };
+        done({ ok: true, detail: `signal-cli ${msg.result?.version ?? ''} for ${account}`.trim() });
+      } catch {
+        done({
+          ok: false,
+          problem: 'Something answered, but not signal-cli.',
+          fix: 'Check SIGNAL_RPC points at the signal-cli daemon.',
+        });
+      }
+    });
+  });
+}
+
+// ── iMessage (macOS) ──
+
+export async function checkIMessage(dbPath: string): Promise<CheckResult> {
+  if (process.platform !== 'darwin') {
+    return {
+      ok: false,
+      problem: 'iMessage needs a Mac.',
+      fix: 'Run ClawBridge on a Mac signed in to Messages to use iMessage.',
+    };
+  }
+  try {
+    fs.accessSync(dbPath, fs.constants.R_OK);
+    const fd = fs.openSync(dbPath, 'r');
+    fs.closeSync(fd);
+  } catch {
+    return {
+      ok: false,
+      problem: 'ClawBridge cannot read the Messages database.',
+      fix: 'System Settings → Privacy & Security → Full Disk Access: turn it on for the app that runs ClawBridge (Terminal or node), then restart it.',
+    };
+  }
+  return { ok: true, detail: 'Messages database readable' };
+}
+
+// ── Email (Postmark) ──
+
+export async function checkPostmark(token: string, fetchImpl: FetchLike = fetch): Promise<CheckResult> {
+  const res = await fetchImpl('https://api.postmarkapp.com/server', {
+    headers: { Accept: 'application/json', 'X-Postmark-Server-Token': token },
+  });
+  const body = (await res.json().catch(() => ({}))) as { Name?: string; InboundAddress?: string; Message?: string };
+  if (!res.ok || !body.Name) {
+    return {
+      ok: false,
+      problem: `Postmark didn't accept the token (${body.Message ?? `HTTP ${res.status}`}).`,
+      fix: 'Postmark → Servers → your server → API Tokens: copy the Server API token.',
+    };
+  }
+  return {
+    ok: true,
+    detail: `${body.Name}${body.InboundAddress ? ` (inbound: ${body.InboundAddress})` : ''}`,
+    extra: { inbound: body.InboundAddress ?? '' },
+  };
+}
+
+export function newInboundToken(): string {
+  return crypto.randomBytes(18).toString('base64url');
+}

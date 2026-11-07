@@ -132,3 +132,44 @@ describe('setEnvValues', () => {
     expect(() => setEnvValues({ BAD: 'a\nINJECTED=1' }, file)).toThrow();
   });
 });
+
+describe('/connect for more channels', () => {
+  beforeEach(() => {
+    runMigrations(initTestDb());
+    saved.length = 0;
+    resetConnectFlows();
+    upsertUser({ id: OWNER, kind: 'telegram', display_name: 'Ana', created_at: new Date().toISOString() });
+    grantRole({
+      user_id: OWNER,
+      role: 'owner',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: new Date().toISOString(),
+    });
+  });
+  afterEach(() => {
+    closeDb();
+    vi.unstubAllGlobals();
+  });
+
+  it('connects email through Postmark and gives the inbound webhook to set', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () => new Response(JSON.stringify({ Name: 'Acme', InboundAddress: 'x@inbound.postmarkapp.com' })),
+    );
+    expect(await say('/connect email')).toMatch(/Postmark/);
+    await say('pm-server-token');
+    const done = await say('ava@acme.test');
+    expect(saved[0]).toMatchObject({ POSTMARK_SERVER_TOKEN: 'pm-server-token', EMAIL_FROM: 'ava@acme.test' });
+    expect(done).toContain(`/webhook/email?token=${saved[0].EMAIL_INBOUND_TOKEN}`);
+  });
+
+  it('checks the signal-cli daemon before saving Signal', async () => {
+    await say('/connect signal');
+    expect(await say('555')).toMatch(/international format/);
+    const reply = await say('+15550001111');
+    // No daemon on the default port in tests: nothing is saved and the fix is explained.
+    expect(saved).toEqual([]);
+    expect(reply).toMatch(/signal-cli/);
+  });
+});

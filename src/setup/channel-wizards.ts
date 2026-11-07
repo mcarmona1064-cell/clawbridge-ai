@@ -13,6 +13,10 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import {
+  checkIMessage,
+  checkPostmark,
+  checkSignalDaemon,
+  newInboundToken,
   checkDiscordToken,
   checkSlackAppToken,
   checkSlackBotToken,
@@ -215,6 +219,100 @@ export async function runDiscordWizard(): Promise<WizardOutput | null> {
   };
 }
 
+export async function runSignalWizard(): Promise<WizardOutput | null> {
+  p.note(
+    [
+      'Signal has no bot accounts, so the assistant uses its own number (a spare SIM or VoIP number is best).',
+      '1. Install signal-cli (macOS: brew install signal-cli).',
+      '2. Register the number: signal-cli -a +1555… register  (then verify with the SMS code).',
+      '3. Keep it running: signal-cli -a +1555… daemon --tcp 127.0.0.1:7583',
+    ].join('\n'),
+    'Signal',
+  );
+  const got = await untilAccepted(
+    'Signal',
+    async () => {
+      const n = await p.text({
+        message: "The assistant's Signal number",
+        placeholder: '+15550001111',
+        validate: (v) =>
+          /^\+\d{7,15}$/.test(v?.trim() ?? '') ? undefined : 'Use the international format, e.g. +15550001111',
+      });
+      if (p.isCancel(n)) return null;
+      const addr = await p.text({ message: 'signal-cli daemon address', initialValue: '127.0.0.1:7583' });
+      if (p.isCancel(addr)) return null;
+      return [String(n).trim(), String(addr).trim()];
+    },
+    ([n, addr]) => checkSignalDaemon(addr, n),
+  );
+  if (!got) return null;
+  return {
+    env: { SIGNAL_ACCOUNT: got.values[0], SIGNAL_RPC: got.values[1] },
+    next: [
+      `Signal: message ${got.values[0]} from your phone. Keep the signal-cli daemon running (or install it as a service).`,
+    ],
+  };
+}
+
+export async function runIMessageWizard(): Promise<WizardOutput | null> {
+  p.note(
+    [
+      'iMessage works on a Mac signed in to Messages (a separate Apple ID for the assistant is best).',
+      '1. Open Messages and sign in.',
+      '2. System Settings → Privacy & Security → Full Disk Access → allow the app that runs ClawBridge.',
+      '3. The first reply asks to let it control Messages; click OK.',
+    ].join('\n'),
+    'iMessage',
+  );
+  const dbPath = (await import('path')).join((await import('os')).homedir(), 'Library', 'Messages', 'chat.db');
+  const got = await untilAccepted(
+    'iMessage',
+    async () => [dbPath],
+    ([db]) => checkIMessage(db),
+  );
+  if (!got) return null;
+  return {
+    env: { IMESSAGE_ENABLED: 'true' },
+    next: ["iMessage: send a message to this Mac's Apple ID from your phone."],
+  };
+}
+
+export async function runEmailWizard(): Promise<WizardOutput | null> {
+  p.note(
+    [
+      'Email uses Postmark (free tier available) for receiving and sending.',
+      '1. postmarkapp.com → create a Server, verify your sending domain or address.',
+      '2. Copy the Server API token (API Tokens tab).',
+    ].join('\n'),
+    'Email',
+  );
+  const got = await untilAccepted(
+    'Postmark',
+    async () => {
+      const t = await secret('Postmark Server API token');
+      return t ? [t] : null;
+    },
+    ([t]) => checkPostmark(t),
+  );
+  if (!got) return null;
+  const from = await p.text({
+    message: "The assistant's email address (a verified sender)",
+    validate: (v) => (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v?.trim() ?? '') ? undefined : 'An email address'),
+  });
+  if (p.isCancel(from)) return null;
+  const inbound = newInboundToken();
+  return {
+    env: { POSTMARK_SERVER_TOKEN: got.values[0], EMAIL_FROM: String(from).trim(), EMAIL_INBOUND_TOKEN: inbound },
+    next: [
+      'Email: in Postmark → your server → Default Inbound Stream → Settings, set the webhook to',
+      `  <your public address>/webhook/email?token=${inbound}   (clawbridge-ai tunnel gives you one)`,
+      got.result.extra?.inbound
+        ? `Then email ${got.result.extra.inbound} (or forward your address to it).`
+        : 'Then send it an email.',
+    ],
+  };
+}
+
 export async function runChannelWizard(channel: string, appName: string): Promise<WizardOutput | null> {
   switch (channel) {
     case 'telegram':
@@ -225,6 +323,12 @@ export async function runChannelWizard(channel: string, appName: string): Promis
       return runWhatsAppWizard();
     case 'discord':
       return runDiscordWizard();
+    case 'signal':
+      return runSignalWizard();
+    case 'imessage':
+      return runIMessageWizard();
+    case 'email':
+      return runEmailWizard();
     default:
       return null;
   }

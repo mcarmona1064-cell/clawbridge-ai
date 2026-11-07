@@ -13,6 +13,10 @@
  * delete the messages that held tokens, since the chat app keeps them.
  */
 import {
+  checkIMessage,
+  checkPostmark,
+  checkSignalDaemon,
+  newInboundToken,
   checkDiscordToken,
   checkSlackAppToken,
   checkSlackBotToken,
@@ -129,6 +133,60 @@ export const CHANNELS: Record<string, ChannelSpec> = {
         `Then message ${r.detail.replace(/^.*\(|\)$/g, '')} on WhatsApp.`,
       ].join('\n'),
   },
+  signal: {
+    label: 'Signal',
+    intro: () =>
+      [
+        'Signal needs its own number for the assistant and signal-cli running on the host:',
+        'signal-cli -a <number> register, then signal-cli -a <number> daemon --tcp 127.0.0.1:7583',
+      ].join('\n'),
+    steps: [
+      {
+        key: 'SIGNAL_ACCOUNT',
+        ask: "Send the assistant's Signal number, like +15550001111.",
+        format: (v) => (/^\+\d{7,15}$/.test(v) ? null : 'Use the international format, e.g. +15550001111'),
+      },
+    ],
+    check: (v) => checkSignalDaemon('127.0.0.1:7583', v.SIGNAL_ACCOUNT),
+    extra: () => ({ SIGNAL_RPC: '127.0.0.1:7583' }),
+    done: (v) => `Signal is connected. Message ${v.SIGNAL_ACCOUNT} from your phone.`,
+  },
+  imessage: {
+    label: 'iMessage',
+    intro: () =>
+      'On the Mac that runs ClawBridge: sign in to Messages, and give the app running ClawBridge Full Disk Access (System Settings → Privacy & Security).',
+    steps: [
+      {
+        key: 'IMESSAGE_CONFIRM',
+        ask: 'Reply "ready" when that is done.',
+        format: (v) => (/^ready$/i.test(v) ? null : 'Reply "ready" when it is done'),
+      },
+    ],
+    check: () => checkIMessage(`${process.env.HOME ?? ''}/Library/Messages/chat.db`),
+    extra: () => ({ IMESSAGE_ENABLED: 'true' }),
+    done: () => "iMessage is connected. Send a message to this Mac's Apple ID.",
+  },
+  email: {
+    label: 'Email',
+    intro: () =>
+      'Email uses Postmark. Create a server at postmarkapp.com and verify the address the assistant will send from.',
+    steps: [
+      { key: 'POSTMARK_SERVER_TOKEN', ask: 'Paste the Postmark Server API token.' },
+      {
+        key: 'EMAIL_FROM',
+        ask: "Send the assistant's email address (a verified sender).",
+        format: (v) => (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? null : 'That is not an email address'),
+      },
+    ],
+    check: (v) => checkPostmark(v.POSTMARK_SERVER_TOKEN),
+    extra: () => ({ EMAIL_INBOUND_TOKEN: newInboundToken() }),
+    done: (v, r) =>
+      [
+        `Email is connected (${r.detail}).`,
+        'In Postmark → Default Inbound Stream → Settings, set the webhook to:',
+        `<your public address>/webhook/email?token=${v.EMAIL_INBOUND_TOKEN}`,
+      ].join('\n'),
+  },
   discord: {
     label: 'Discord',
     intro: () =>
@@ -218,7 +276,9 @@ export async function handleConnect(input: ConnectInput): Promise<string> {
   if (!result.ok)
     return `${result.problem}\nHow to fix: ${result.fix}\nSend /connect ${flow.channel} to try again. ${DELETE_HINT}`;
 
-  const values = { ...flow.values, ...(spec.extra?.(flow.values, result) ?? {}) };
+  const { IMESSAGE_CONFIRM: _confirm, ...entered } = flow.values;
+  void _confirm;
+  const values = { ...entered, ...(spec.extra?.(flow.values, result) ?? {}) };
   try {
     setEnvValues(values);
   } catch (err) {

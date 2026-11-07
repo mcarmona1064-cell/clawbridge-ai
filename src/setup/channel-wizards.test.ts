@@ -98,3 +98,45 @@ describe('channel setup checks', () => {
     });
   });
 });
+
+describe('more channel checks', () => {
+  it('Postmark: confirms the server and returns its inbound address', async () => {
+    const { checkPostmark } = await import('./channel-wizards.js');
+    expect(
+      await checkPostmark('t', reply({ Name: 'Acme', InboundAddress: 'abc@inbound.postmarkapp.com' })),
+    ).toMatchObject({
+      ok: true,
+      extra: { inbound: 'abc@inbound.postmarkapp.com' },
+    });
+    expect(await checkPostmark('t', reply({ ErrorCode: 10, Message: 'Bad token' }, 401))).toMatchObject({
+      ok: false,
+      fix: expect.stringContaining('Server API token'),
+    });
+  });
+
+  it('Signal: talks to the signal-cli daemon, and explains how to start it', async () => {
+    const net = await import('net');
+    const { checkSignalDaemon } = await import('./channel-wizards.js');
+    const server = net.createServer((s) =>
+      s.on('data', () => s.write('{"jsonrpc":"2.0","result":{"version":"0.13.9"},"id":1}\n')),
+    );
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const port = (server.address() as import('net').AddressInfo).port;
+    expect(await checkSignalDaemon(`127.0.0.1:${port}`, '+1555')).toEqual({
+      ok: true,
+      detail: 'signal-cli 0.13.9 for +1555',
+    });
+    server.close();
+    expect(await checkSignalDaemon('127.0.0.1:1', '+1555')).toMatchObject({
+      ok: false,
+      fix: expect.stringContaining('daemon --tcp'),
+    });
+  });
+
+  it('iMessage: needs a readable Messages database', async () => {
+    const { checkIMessage } = await import('./channel-wizards.js');
+    const r = await checkIMessage('/nonexistent/chat.db');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.fix).toMatch(process.platform === 'darwin' ? /Full Disk Access/ : /Mac/);
+  });
+});

@@ -777,6 +777,9 @@ async function checkChannels(env: Map<string, string>, autoFix: boolean): Promis
     'DISCORD_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
+    'SIGNAL_ACCOUNT',
+    'IMESSAGE_ENABLED',
+    'POSTMARK_SERVER_TOKEN',
     'WHATSAPP_PHONE_NUMBER_ID',
     'WHATSAPP_ACCESS_TOKEN',
   ].some((k) => env.get(k));
@@ -790,6 +793,34 @@ async function checkChannels(env: Map<string, string>, autoFix: boolean): Promis
   await checkWhatsApp(env, autoFix);
   await checkDiscord(env, autoFix);
   await checkSlack(env, autoFix);
+  await checkMoreChannels(env);
+}
+
+/** Signal, iMessage and email: the same plain-English check the setup wizard uses. */
+async function checkMoreChannels(env: Map<string, string>): Promise<void> {
+  const { checkIMessage, checkPostmark, checkSignalDaemon } = await import('./channels/credential-checks.js');
+  const show = (label: string, r: { ok: true; detail: string } | { ok: false; problem: string; fix: string }) =>
+    r.ok ? pass(label, r.detail) : fail(label, r.problem, r.fix);
+  const account = env.get('SIGNAL_ACCOUNT');
+  if (account) show('Signal', await checkSignalDaemon(env.get('SIGNAL_RPC') || '127.0.0.1:7583', account));
+  if (env.get('IMESSAGE_ENABLED') === 'true') {
+    show(
+      'iMessage',
+      await checkIMessage(env.get('IMESSAGE_DB') || path.join(os.homedir(), 'Library', 'Messages', 'chat.db')),
+    );
+  }
+  const pm = env.get('POSTMARK_SERVER_TOKEN');
+  if (pm) {
+    const r = await checkPostmark(pm).catch((e: Error) => ({
+      ok: false as const,
+      problem: `unreachable (${e.message})`,
+      fix: 'check internet connection',
+    }));
+    show('Email (Postmark)', r);
+    if (r.ok && (!env.get('EMAIL_FROM') || !env.get('EMAIL_INBOUND_TOKEN'))) {
+      fail('Email setup', 'EMAIL_FROM or EMAIL_INBOUND_TOKEN missing', 'run /connect email in chat, or clawbridge-ai');
+    }
+  }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
