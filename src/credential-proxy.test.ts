@@ -121,6 +121,18 @@ describe('credential proxy', () => {
     await proxy.close();
   });
 
+  it("lets Claude Code's connectivity probe through without any credential", async () => {
+    const proxy = proxyWithLocalUpstream();
+    const port = await proxy.listen(0, '127.0.0.1');
+    const res = await fetch(`http://127.0.0.1:${port}/anthropic/api/hello`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+    expect(seen[0].headers['x-api-key']).toBeUndefined();
+    expect(seen[0].headers['authorization']).toBeUndefined();
+    // Anything else still needs a placeholder.
+    expect((await fetch(`http://127.0.0.1:${port}/anthropic/v1/models`)).status).toBe(401);
+    await proxy.close();
+  });
+
   it('reads placeholders from every header style', () => {
     expect(placeholderFrom({ 'x-api-key': 'cbp_a' })).toBe('cbp_a');
     expect(placeholderFrom({ authorization: 'Bearer cbp_b' })).toBe('cbp_b');

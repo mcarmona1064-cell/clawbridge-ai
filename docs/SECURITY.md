@@ -75,7 +75,8 @@ Messages and task operations are verified against group identity:
   - Each container gets a per-session placeholder (`cbp_…`), with `ANTHROPIC_BASE_URL` pointing at the host proxy (`src/credential-proxy.ts`).
   - The proxy accepts a placeholder only for the API it was issued for, swaps in the real credential, and streams the reply.
   - Placeholders are revoked when the container exits. A copied placeholder is useless anywhere else.
-- **Direct (default until the proxy has been checked live):** the credential is passed with `-e` to `docker run`, so code the agent runs can read it.
+- **Verified so far:** Claude Code inside a container sends the placeholder to the proxy as `Authorization: Bearer cbp_…`, after an unauthenticated `HEAD /api/hello` probe that the proxy lets through. The full round trip to Anthropic with a real token has not been tested yet.
+- **Direct (when `CREDENTIAL_PROXY` is unset):** the credential is passed with `-e` to `docker run`, so code the agent runs can read it.
   - **Claude:** the subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) or `ANTHROPIC_API_KEY` from `~/.clawbridge/.env`.
 - **Codex** (either way): `~/.codex/auth.json`, including its refresh token, is copied into the group's `.codex-shared/` state dir, which is mounted read-write at `/home/node/.codex`.
   - Codex refreshes and rewrites this file itself, so it is not proxied yet.

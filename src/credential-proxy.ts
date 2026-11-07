@@ -189,7 +189,11 @@ export class CredentialProxy {
 
     const token = placeholderFrom(req.headers);
     const grant = token ? this.grants.get(token) : undefined;
-    if (!grant) return this.deny(res, 401, 'unknown or revoked placeholder', { route: route.prefix });
+    // Claude Code probes connectivity with an unauthenticated HEAD /api/hello; let it through bare.
+    const probe =
+      (req.method === 'HEAD' || req.method === 'GET') && url.slice(route.prefix.length).split('?')[0] === '/api/hello';
+    if (!grant && !probe) return this.deny(res, 401, 'unknown or revoked placeholder', { route: route.prefix });
+    if (!grant) return this.forward(req, res, route, url, null);
     if (ROUTE_FOR_KIND[grant.kind] !== route.prefix) {
       return this.deny(res, 403, 'placeholder not valid for this API', {
         route: route.prefix,
@@ -197,10 +201,20 @@ export class CredentialProxy {
       });
     }
 
+    this.forward(req, res, route, url, grant);
+  }
+
+  private forward(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    route: RouteConfig,
+    url: string,
+    grant: Grant | null,
+  ): void {
     const headers: http.OutgoingHttpHeaders = {};
     for (const [k, v] of Object.entries(req.headers)) if (!HOP_HEADERS.has(k) && v !== undefined) headers[k] = v;
     headers['host'] = route.upstream.host;
-    injectFor(grant.kind, headers, grant.secret);
+    if (grant) injectFor(grant.kind, headers, grant.secret);
 
     const client = route.upstream.protocol === 'https:' ? https : http;
     const upstreamReq = client.request(
