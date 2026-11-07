@@ -12,6 +12,7 @@ import './agents.js';
 import './self-mod.js';
 import './team-memory.js';
 import './host-exec.js';
+import './integrations.js';
 import { startMcpServer } from './server.js';
 
 function log(msg: string): void {

@@ -362,6 +362,11 @@ async function main(): Promise<void> {
 
   // 6b. Start host_exec watcher (file-IPC for the container's host_exec MCP tool).
   startHostExecWatcher();
+  // 6c. Integrations watcher (file-IPC for integration_request; credentials stay on the host).
+  {
+    const { startIntegrationsWatcher } = await import('./modules/integrations/index.js');
+    startIntegrationsWatcher();
+  }
 
   // 7. Start health monitoring
   startHealthCheck();
