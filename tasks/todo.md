@@ -89,11 +89,11 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Milestone 3: trust and cost
 
-- [ ] 3.1 **Usage ledger.** Usage ledger plus budgets, alerts and pause-and-queue.
-- [ ] 3.2 **Policies.** Allow/ask/deny policies with risk labels, scoped "always allow" and `/permissions`.
-- [ ] 3.3 **Claim-receipt gate.** Claim-receipt gate and idempotency keys.
-- [ ] 3.4 **Egress guard.** Audience-aware egress guard across channels.
-- [ ] 3.5 **RBAC.** RBAC (Owner, Admin, Approver, User, Auditor) on linked identities, plus policies for unknown senders.
+- [x] 3.1 **Usage ledger.** Usage ledger plus budgets, alerts and pause-and-queue.
+- [x] 3.2 **Policies.** Allow/ask/deny policies with risk labels, scoped "always allow" and `/permissions`.
+- [x] 3.3 **Claim-receipt gate.** Claim-receipt gate and idempotency keys.
+- [x] 3.4 **Egress guard.** Audience-aware egress guard across channels.
+- [x] 3.5 **RBAC.** RBAC (Owner, Admin, Approver, User, Auditor) on linked identities, plus policies for unknown senders.
 
 ## Milestone 4: capabilities
 
@@ -267,4 +267,39 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
    - Send `!mute 1`, then a message: no reply. `!unmute`.
 3. **Onboarding:** DM the agent as the owner, tap "Start setup" and answer the questions. A new conversation should know the business.
 4. **Console:** `clawbridge-ai console` → open the link; you should see the channels and the audit log.
+
+### Milestone 3 (pushed to `ai` main, 2026-11-06)
+
+**What changed for users (the same on every channel)**
+
+- **Usage and budgets:**
+  - `/usage` shows this month's replies, tokens and API-price estimate. The per-person breakdown is visible to admins and auditors only.
+  - `/budget 5M|$50|off` sets a monthly budget per agent, with alerts at 50, 75, 90 and 100%.
+  - At the cap, messages are held and the chat is told.
+- **Permissions:**
+  - Approval cards show a risk badge and, where safe, an "Always allow `npm test`" button.
+  - `/permissions` lists, revokes and denies rules.
+  - Deleting, sudo, downloads, `git push`, chained shell commands and secrets always ask.
+- **Honesty:**
+  - A reply that claims it scheduled something, saved to team memory or posted elsewhere, with no matching action recorded, gets a correction.
+  - Anything written in a DM needs approval before it goes to a group.
+- **Roles:** approver and auditor roles, managed with `/roles`.
+- **Memory:** `/memory` shows, searches and forgets memories, and checks each deletion.
+
+**Verified:** 458 host tests and the runner usage tests pass.
+
+**Not verified live:**
+- That real Claude and Codex runs report usage in the shapes parsed here. The parsers follow the SDK and CLI event formats.
+- That Hindsight 1.2.0's delete-document call behaves like the test fake.
+
+**Gaps:**
+- No cost footer on replies: usage arrives after the reply is sent.
+- No idempotency keys beyond the existing per-message ids.
+- No evidence links in replies.
+
+**Live checks**
+1. **Usage:** send a few messages, then `/usage`. Then `/budget 1k`, send one more, and check that the chat says messages are held. `/budget off` releases them.
+2. **Always allow:** with `allowHostExec`, ask the agent to run `npm test`. Tap "Always allow `npm test`", ask again, and it should run without a card. `/permissions` lists the rule.
+3. **Audience guard:** DM the agent "post 'hello' in #general". An approval card should appear first.
+4. **Memory:** `/memory`, then `/memory forget <id>`, then `/memory` again: the item should be gone.
 
