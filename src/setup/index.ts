@@ -120,13 +120,6 @@ function printBanner(): void {
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
 
-function validateTelegramToken(value: string | undefined): string | undefined {
-  const t = (value ?? '').trim();
-  if (!t) return 'Required';
-  if (!/^\d+:[A-Za-z0-9_-]{35,}$/.test(t)) return 'Expected format: 123456789:ABCdef…';
-  return undefined;
-}
-
 function validateEmail(value: string | undefined): string | undefined {
   const v = (value ?? '').trim();
   if (!v) return 'Required';
@@ -160,6 +153,8 @@ interface FreshConfig {
   providers: ProviderSetup;
   telegramToken?: string;
   channels: string[];
+  /** Checked credentials collected by the channel wizards. */
+  channelEnv?: Record<string, string>;
   hindsightDbPassword?: string;
   hindsightApiKey?: string;
   hindsightUrl?: string;
@@ -190,24 +185,37 @@ function buildEnvFile(cfg: FreshConfig, existingEnv?: Map<string, string>): stri
     );
   }
 
-  if (cfg.telegramToken) {
-    lines.push('# Telegram', `TELEGRAM_BOT_TOKEN=${cfg.telegramToken}`, '');
+  const ce = cfg.channelEnv ?? {};
+  const val = (key: string) => ce[key] ?? '';
+  if (cfg.telegramToken || ce.TELEGRAM_BOT_TOKEN) {
+    lines.push('# Telegram', `TELEGRAM_BOT_TOKEN=${ce.TELEGRAM_BOT_TOKEN ?? cfg.telegramToken}`, '');
   }
   if (cfg.channels.includes('discord')) {
-    lines.push('# Discord', 'DISCORD_BOT_TOKEN=', '');
+    lines.push('# Discord', `DISCORD_BOT_TOKEN=${val('DISCORD_BOT_TOKEN')}`, '');
   }
   if (cfg.channels.includes('slack')) {
-    lines.push('# Slack', 'SLACK_BOT_TOKEN=', 'SLACK_SIGNING_SECRET=', '');
-  }
-  if (cfg.channels.includes('whatsapp')) {
     lines.push(
-      '# WhatsApp',
-      'WHATSAPP_PHONE_NUMBER_ID=',
-      'WHATSAPP_ACCESS_TOKEN=',
-      'WHATSAPP_WEBHOOK_VERIFY_TOKEN=',
+      '# Slack (Socket Mode: no public URL needed)',
+      `SLACK_BOT_TOKEN=${val('SLACK_BOT_TOKEN')}`,
+      `SLACK_APP_TOKEN=${val('SLACK_APP_TOKEN')}`,
       '',
     );
   }
+  if (cfg.channels.includes('whatsapp')) {
+    lines.push(
+      '# WhatsApp (official Cloud API)',
+      `WHATSAPP_PHONE_NUMBER_ID=${val('WHATSAPP_PHONE_NUMBER_ID')}`,
+      `WHATSAPP_ACCESS_TOKEN=${val('WHATSAPP_ACCESS_TOKEN')}`,
+      `WHATSAPP_APP_SECRET=${val('WHATSAPP_APP_SECRET')}`,
+      `WHATSAPP_WEBHOOK_VERIFY_TOKEN=${val('WHATSAPP_WEBHOOK_VERIFY_TOKEN')}`,
+      '',
+    );
+  }
+  lines.push(
+    '# Keep the Claude credential on the host; containers get a placeholder.',
+    `CREDENTIAL_PROXY=${existingEnv?.get('CREDENTIAL_PROXY') ?? 'on'}`,
+    '',
+  );
   if (cfg.channels.includes('gmail')) {
     lines.push('# Gmail', 'GMAIL_CLIENT_ID=', 'GMAIL_CLIENT_SECRET=', '');
   }
@@ -580,13 +588,16 @@ async function runFreshInstall(): Promise<void> {
   // Step 1 — Providers + auth
   const providerSetup = await setupProviders(parseEnvFile(path.join(os.homedir(), '.clawbridge', '.env')));
 
-  // Step 2 — Channels
+  // Step 2 — Agent name (Slack names the app after it)
+  const agentName = await promptAgentName();
+
+  // Step 3 — Channels
   type ChannelOption = { value: string; label: string; hint?: string };
   const channelOptions: ChannelOption[] = [
-    { value: 'telegram', label: 'Telegram', hint: 'recommended' },
-    { value: 'whatsapp', label: 'WhatsApp' },
+    { value: 'telegram', label: 'Telegram', hint: 'quickest — 2 minutes' },
+    { value: 'slack', label: 'Slack', hint: 'one-click app, no public URL' },
+    { value: 'whatsapp', label: 'WhatsApp', hint: 'official Business API' },
     { value: 'discord', label: 'Discord' },
-    { value: 'slack', label: 'Slack' },
     { value: 'gmail', label: 'Gmail' },
   ];
   const channelChoices = ensure(
@@ -597,21 +608,20 @@ async function runFreshInstall(): Promise<void> {
     }),
   ) as string[];
 
-  // Step 3 — Telegram token (if selected)
-  let telegramToken: string | undefined;
-  if (channelChoices.includes('telegram')) {
-    telegramToken = ensure(
-      await p.text({
-        message: 'Telegram bot token (from @BotFather)',
-        placeholder: '123456789:ABCdef…',
-        validate: validateTelegramToken,
-      }),
-    ) as string;
-    telegramToken = telegramToken.trim();
+  // Step 4 — Connect each channel, checking every credential with the platform.
+  const { runChannelWizard } = await import('./channel-wizards.js');
+  const channelEnv: Record<string, string> = {};
+  const nextSteps: string[] = [];
+  for (const channel of channelChoices) {
+    const out = await runChannelWizard(channel, agentName);
+    if (out) {
+      Object.assign(channelEnv, out.env);
+      nextSteps.push(...out.next);
+    } else if (['telegram', 'slack', 'whatsapp', 'discord'].includes(channel)) {
+      p.log.warn(`${channel} skipped — add it later with: clawbridge-ai`);
+    }
   }
-
-  // Step 4 — Agent name
-  const agentName = await promptAgentName();
+  const telegramToken: string | undefined = channelEnv.TELEGRAM_BOT_TOKEN;
 
   // Step 5 — Hindsight (optional)
   const { dbPassword: hindsightDbPassword, apiKey: hindsightApiKey, url: hindsightUrl } = await promptHindsight();
@@ -622,6 +632,7 @@ async function runFreshInstall(): Promise<void> {
     providers: providerSetup,
     telegramToken,
     channels: channelChoices,
+    channelEnv,
     hindsightDbPassword,
     hindsightApiKey,
     hindsightUrl,
@@ -824,6 +835,9 @@ async function runFreshInstall(): Promise<void> {
       outroLines.push(`  • Telegram:  ${k.bold('@' + botUsername)}  ← message me to start`);
     } else if (telegramToken) {
       outroLines.push(`  • Telegram:  configured ← message your bot to start`);
+    }
+    if (nextSteps.length > 0) {
+      outroLines.push('', k.bold('Say hi to your agent:'), ...nextSteps.map((l) => `  ${l}`), '');
     }
     outroLines.push(`  • Docs:      ${k.bold('https://docs.clawbridge.dev')}`);
     p.outro(outroLines.join('\n'));
