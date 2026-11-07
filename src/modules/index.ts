@@ -26,4 +26,6 @@ import './team-memory/index.js';
 import './identity/index.js';
 import './onboarding/index.js';
 import './usage/index.js';
+// Registers the cross-post approval handlers (must load before any card is answered).
+import '../egress-guard.js';
 import './host-commands/index.js';

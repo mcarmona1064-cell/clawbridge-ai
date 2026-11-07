@@ -381,6 +381,15 @@ async function deliverMessage(
         );
       }
     }
+
+    // Audience guard: something written in a private chat must not land in a
+    // group without a person saying so.
+    if (!isOriginChat) {
+      const origin = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+      const { holdCrossPost } = await import('./egress-guard.js');
+      if (await holdCrossPost(session, origin, mg, msg)) return undefined;
+      recordSessionAction(session.id, 'cross_post');
+    }
   }
 
   // Track pending questions for ask_user_question flow.
