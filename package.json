@@ -64,6 +64,7 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
+    "eval": "vitest run --config vitest.evals.config.ts",
     "test:watch": "vitest",
     "postinstall": "node -e \"try{require('better-sqlite3')}catch(e){console.error('\\n⚠ ClawBridge needs build tools for the database driver.\\nRun: apt install -y python3 make g++ (Ubuntu/Debian) or yum install -y python3 make gcc-c++ (CentOS)\\nThen: npm install -g clawbridge-ai\\n')}\""
   },

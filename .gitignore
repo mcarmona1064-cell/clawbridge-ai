@@ -39,3 +39,4 @@ groups/*
 .nanoclaw/
 
 agents-sdk-docs
+evals/report.json

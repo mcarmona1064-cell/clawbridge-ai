@@ -372,7 +372,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
  *                      a thread has engaged us once, follow-ups arrive
  *                      with no mention and should still fire.
  */
-function evaluateEngage(
+export function evaluateEngage(
   agent: MessagingGroupAgent,
   text: string,
   isMention: boolean,

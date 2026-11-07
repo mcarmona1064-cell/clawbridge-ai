@@ -34,6 +34,9 @@ jobs:
       - name: Host tests
         run: pnpm exec vitest run
 
+      - name: Eval suite
+        run: pnpm run eval
+
       - name: Container tests
         working-directory: container/agent-runner
         run: bun test
