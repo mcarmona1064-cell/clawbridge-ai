@@ -35,6 +35,8 @@ import { lastWasVoice, synthesize, voiceRepliesOn } from './voice-replies.js';
 import { costFooterFor } from './usage.js';
 import { sendAdminAlert } from './shared/admin-alert.js';
 import { clearProgressWatch } from './progress-notice.js';
+import { isDigestTurn, recordDigestPosted } from './digest-stats.js';
+import { DIGEST_PROMPT } from './modules/host-commands/digest-cmd.js';
 
 function extractText(jsonContent: string): string {
   try {
@@ -467,6 +469,9 @@ async function deliverMessage(
   if (msg.kind === 'chat' && typeof content.text === 'string' && content.text.trim() === 'NO_DIGEST') {
     log.info('Digest had nothing new; not posted', { id: msg.id, sessionId: session.id });
     return undefined;
+  }
+  if (msg.kind === 'chat' && typeof content.text === 'string' && isDigestTurn(inDb, DIGEST_PROMPT)) {
+    recordDigestPosted(session.id);
   }
 
   // Optional cost footer (/usage footer on), once per turn.

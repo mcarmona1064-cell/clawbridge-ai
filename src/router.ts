@@ -46,6 +46,7 @@ const RECALL_WAIT_MS = 1500;
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
 import { startProgressWatch } from './progress-notice.js';
+import { recordHumanActivity } from './digest-stats.js';
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -638,6 +639,7 @@ async function deliverToAgent(
     // messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
     startProgressWatch(session.id, deliveryAddr.channelType, deliveryAddr.platformId, deliveryAddr.threadId);
+    if (userId) recordHumanActivity(session.id);
     // The person sees at once that their message was picked up.
     if (event.message.kind === 'chat' || event.message.kind === 'chat-sdk') acknowledgeInbound(event);
     // First DM from an owner or admin: offer the one-minute setup (once).

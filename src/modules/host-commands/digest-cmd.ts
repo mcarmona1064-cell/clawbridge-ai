@@ -19,6 +19,7 @@ import { openInboundDb } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { cancelTask, insertTask } from '../scheduling/db.js';
 import { hasAdminPrivilege } from '../permissions/db/user-roles.js';
+import { digestScore } from '../../digest-stats.js';
 
 /** Reply the agent gives when the digest would say nothing new; never posted. */
 export const NO_DIGEST = 'NO_DIGEST';
@@ -71,7 +72,11 @@ export function digestCommand(opts: {
     if (!sub) {
       if (!current?.recurrence) return 'No daily digest here. /digest on 9:00 starts one (weekdays).';
       const [min, hour] = current.recurrence.split(' ');
-      return `Daily digest is on, weekdays at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}. /digest off stops it.`;
+      const score = digestScore(opts.session.id);
+      const scorecard = score.posted
+        ? ` So far ${score.posted} posted; people responded to ${score.engaged} (${Math.round((score.engaged / score.posted) * 100)}%).`
+        : '';
+      return `Daily digest is on, weekdays at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}.${scorecard} /digest off stops it.`;
     }
     if (opts.isGroup && (!opts.userId || !hasAdminPrivilege(opts.userId, opts.session.agent_group_id))) {
       return 'Only an admin can change the digest in a group.';

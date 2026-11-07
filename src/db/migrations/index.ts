@@ -29,6 +29,7 @@ import { migration022 } from './022-tool-policies.js';
 import { migration023 } from './023-session-prefs.js';
 import { migration024 } from './024-voice-replies.js';
 import { migration025 } from './025-cost-footer.js';
+import { migration026 } from './026-digest-stats.js';
 
 export interface Migration {
   version: number;
@@ -65,6 +66,7 @@ const migrations: Migration[] = [
   migration023,
   migration024,
   migration025,
+  migration026,
 ];
 
 export function runMigrations(db: Database.Database): void {
