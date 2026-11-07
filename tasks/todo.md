@@ -67,19 +67,19 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 
 ## Milestone 2: easy to use
 
-- [ ] 2.1 **Install and setup.** A one-command install (`npx clawbridge-ai`) and a wizard per channel (Slack manifest link, Telegram BotFather, WhatsApp Meta steps, Discord invite link) that ends in a real reply on each.
-- [ ] 2.2 **Doctor.** Plain-English failures, each with the exact fix, for every channel.
-- [ ] 2.3 **Add a channel from chat.** "Connect our WhatsApp" gets a guided walkthrough on the current channel.
-- [ ] 2.4 **Onboarding.** An onboarding conversation that saves its answers as team memory and offers 3 starter tasks as choices.
-- [ ] 2.5 **Configure by chat.** Configure from chat: which chats it answers in, schedules, permissions and provider.
-- [ ] 2.6 **Home screens.**
+- [x] 2.1 **Install and setup.** A one-command install (`npx clawbridge-ai`) and a wizard per channel (Slack manifest link, Telegram BotFather, WhatsApp Meta steps, Discord invite link) that ends in a real reply on each.
+- [~] 2.2 **Doctor.** Plain-English failures, each with the exact fix, for every channel.
+- [x] 2.3 **Add a channel from chat.** "Connect our WhatsApp" gets a guided walkthrough on the current channel.
+- [x] 2.4 **Onboarding.** An onboarding conversation that saves its answers as team memory and offers 3 starter tasks as choices.
+- [~] 2.5 **Configure by chat.** Configure from chat: which chats it answers in, schedules, permissions and provider.
+- [x] 2.6 **Home screens.**
   - Slack App Home
   - Telegram commands menu
   - Discord slash commands
   - a `/status` card everywhere
   - a localhost admin console
-- [ ] 2.7 **Commands and errors.** The same commands everywhere (/help, /status, /usage, /memory, /permissions, /tasks, /provider, plus !stop, !mute, !fast and !deep), and friendly errors with an admin alert.
-- [ ] 2.8 **Native behaviour.**
+- [~] 2.7 **Commands and errors.** The same commands everywhere (/help, /status, /usage, /memory, /permissions, /tasks, /provider, plus !stop, !mute, !fast and !deep), and friendly errors with an admin alert.
+- [~] 2.8 **Native behaviour.**
   - An instant ack and progress updates.
   - Rework choices.
   - Telegram forum topics.
@@ -214,3 +214,57 @@ So approvals, `ask_user_question`, `/teamfact` and team memory only work on Slac
 - While checking the proxy with the host's `claude` CLI, Claude Code fell back to the Mac's keychain subscription login for the API-key test. It sent those real tokens to a local test server on 127.0.0.1.
 - Nothing left the machine, and the log was deleted. The tokens did appear in the session transcript, so the user was asked to sign out of the CLI and back in.
 - Lesson: when testing credential handling with a real CLI, run it with an empty HOME so it can't fall back to stored logins.
+
+### Milestone 2 (pushed to `ai` main, 2026-11-06)
+
+**What changed for users, by channel**
+
+- **Setup:**
+  - `clawbridge-ai` now walks through each channel and checks every credential with the platform before saving it.
+  - **Slack:** a one-click app link with Socket Mode turned on.
+  - **WhatsApp:** the Cloud API steps, the app secret, and a generated verify token.
+  - **Discord:** an invite link with exactly the permissions the bot needs.
+  - **Telegram:** BotFather steps.
+  - The finish screen says how to get the first reply on each channel.
+- **From chat:**
+  - `/connect slack|whatsapp|telegram|discord` adds a channel without a terminal. Tokens are caught before they reach the agent or its memory.
+  - The first DM from an owner offers a four-question setup. Answers go to team memory and a team profile, then three starter tasks follow as buttons.
+  - `/onboard` re-runs that setup.
+- **Every channel:**
+  - `!stop`, `!mute [hours]` and `!unmute`.
+  - `/help` in plain words; it used to be silently dropped.
+  - `/status` shows a status card.
+  - `/tasks` lists jobs; admins can cancel them.
+  - `/reply mentions|all`, plus `/why` for recent answer/quiet decisions.
+  - Friendly error messages, with the details sent to the admin.
+- **Slack:** a Home tab with agents, approvals, jobs and linked accounts. A 👀 reaction appears as soon as the agent picks a message up.
+- **Telegram:**
+  - Forum topics are separate conversations that inherit the group's setup.
+  - Replying to the bot counts as a mention.
+  - 👀 acknowledgement.
+- **Discord:** the slash command menu (`/help`, `/status`, `/tasks`, `/stop`, `/mute`, …) and 👀 acknowledgement.
+- **WhatsApp:** the read receipt and typing indicator act as the acknowledgement.
+- **Host:** a token-protected local admin console (`clawbridge-ai console`). Doctor checks Slack Socket Mode.
+
+**Verified:**
+- 433 host tests pass.
+- The agent-runner tests show the 6 known failures and no new ones.
+
+**Not verified live:** every platform flow above. Fakes, not real accounts, back each test.
+
+**Still open in M2 scope:**
+- An `npx clawbridge-ai` one-liner: the package isn't published to npm.
+- `/usage`, `/memory`, `/permissions`: they need the M3 usage ledger and policy model.
+- `!fast` and `!deep`: they need M4 model routing.
+- Rework buttons (Shorter, Fix this part, Undo).
+- WhatsApp voice replies: they need a text-to-speech provider.
+- The legacy `setup:auto` flow still uses Baileys for WhatsApp.
+
+**Live checks**
+1. **Setup:** run `clawbridge-ai` with Slack selected. The app link should open Slack with the manifest prefilled; paste both tokens; doctor should show "Slack Socket Mode" passing.
+2. **Chat commands:**
+   - In a Telegram DM, send `/connect discord` and follow the steps; the bot should come online without a restart.
+   - Send `!mute 1`, then a message: no reply. `!unmute`.
+3. **Onboarding:** DM the agent as the owner, tap "Start setup" and answer the questions. A new conversation should know the business.
+4. **Console:** `clawbridge-ai console` → open the link; you should see the channels and the audit log.
+
