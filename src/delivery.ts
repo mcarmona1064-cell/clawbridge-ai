@@ -34,6 +34,7 @@ import { gateClaims, recordSessionAction } from './claim-gate.js';
 import { lastWasVoice, synthesize, voiceRepliesOn } from './voice-replies.js';
 import { costFooterFor } from './usage.js';
 import { sendAdminAlert } from './shared/admin-alert.js';
+import { clearProgressWatch } from './progress-notice.js';
 
 function extractText(jsonContent: string): string {
   try {
@@ -218,6 +219,7 @@ async function drainSession(session: Session): Promise<void> {
         // shouldn't get a gap in their typing indicator for them.
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
           pauseTypingRefreshAfterDelivery(session.id);
+          clearProgressWatch(session.id);
 
           // Hindsight retain — pair this user-facing reply with the most
           // recent inbound chat from the same session. Fire-and-forget;

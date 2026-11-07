@@ -48,6 +48,7 @@ import { isLockdownActive, revokeSessionCredentials } from './credential-proxy.j
 import { lockdownNetworkArgs } from './egress-lockdown.js';
 import { modelEnv } from './model-presets.js';
 import { installedSkillsDir } from './modules/skills/paths.js';
+import { clearProgressWatch } from './progress-notice.js';
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -216,6 +217,7 @@ async function spawnContainer(session: Session): Promise<void> {
     revokeSessionCredentials(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    clearProgressWatch(session.id);
     log.info('Container exited', { sessionId: session.id, code, containerName });
 
     if (code === 125) {

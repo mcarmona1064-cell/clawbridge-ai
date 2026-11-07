@@ -45,6 +45,7 @@ import { readableScopesForSession, recallToSessionFile } from './memory/index.js
 const RECALL_WAIT_MS = 1500;
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
+import { startProgressWatch } from './progress-notice.js';
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -636,6 +637,7 @@ async function deliverToAgent(
     // Typing indicator + wake are only for the engaged branch; accumulated
     // messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
+    startProgressWatch(session.id, deliveryAddr.channelType, deliveryAddr.platformId, deliveryAddr.threadId);
     // The person sees at once that their message was picked up.
     if (event.message.kind === 'chat' || event.message.kind === 'chat-sdk') acknowledgeInbound(event);
     // First DM from an owner or admin: offer the one-minute setup (once).
