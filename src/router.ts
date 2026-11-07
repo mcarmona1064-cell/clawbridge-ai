@@ -31,6 +31,7 @@ import {
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh } from './modules/typing/index.js';
+import { acknowledgeInbound } from './ack.js';
 import { log } from './log.js';
 import { resolveSession, sessionDir, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -569,6 +570,8 @@ async function deliverToAgent(
     // Typing indicator + wake are only for the engaged branch; accumulated
     // messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
+    // The person sees at once that their message was picked up.
+    if (event.message.kind === 'chat' || event.message.kind === 'chat-sdk') acknowledgeInbound(event);
 
     // Hindsight recall — write `.memory_context.md` into the session dir
     // BEFORE waking the container, so the agent's first read sees this
