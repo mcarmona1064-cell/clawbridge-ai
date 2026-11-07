@@ -167,6 +167,10 @@ interface TgMessage {
   video?: TgVideo;
   animation?: TgDocument; // Telegram sends GIFs as MP4 animations (same shape as document)
   sticker?: TgSticker;
+  /** Forum topic the message belongs to (supergroups with topics enabled). */
+  message_thread_id?: number;
+  is_topic_message?: boolean;
+  reply_to_message?: { from?: TgUser };
 }
 
 interface TgFile {
@@ -216,7 +220,24 @@ class NetworkError extends Error {
   }
 }
 
-function platformIdFor(chatId: number): string {
+/** Where to send in Telegram: a chat, optionally one forum topic inside it. */
+export interface TgAddress {
+  chat_id: string;
+  message_thread_id?: number;
+}
+
+/**
+ * Forum topics are separate conversations: `telegram:<chat>:<topic>`.
+ * Plain chats stay `telegram:<chat>`.
+ */
+export function telegramAddress(platformId: string): TgAddress {
+  const rest = platformId.startsWith('telegram:') ? platformId.slice('telegram:'.length) : platformId;
+  const [chat, topic] = rest.split(':');
+  return topic ? { chat_id: chat, message_thread_id: Number(topic) } : { chat_id: chat };
+}
+
+function platformIdFor(chatId: number, topicId?: number): string {
+  if (topicId) return `telegram:${chatId}:${topicId}`;
   // Match the form setup/register.ts writes via namespacedPlatformId('telegram', ...).
   // Router does no normalization on inbound, so we MUST emit the prefixed shape.
   return `telegram:${chatId}`;
@@ -524,12 +545,17 @@ function createAdapter(): ChannelAdapter | null {
     // Drop messages with no text and no files (e.g. unsupported sticker types)
     if (!text && files.length === 0) return;
 
-    const platformId = platformIdFor(msg.chat.id);
+    const platformId = platformIdFor(msg.chat.id, msg.is_topic_message ? msg.message_thread_id : undefined);
     const isGroup = msg.chat.type !== 'private';
     // Intercept pairing codes during setup — swallow the message if consumed.
     const adminUserId = msg.from ? String(msg.from.id) : undefined;
     if (interceptPairingMessage(text, platformId, isGroup, adminUserId)) return;
-    const isMention = detectMention(msg, botUsername) || msg.chat.type === 'private';
+    // Replying to one of the bot's messages addresses it too.
+    const repliesToBot =
+      !!botUsername &&
+      msg.reply_to_message?.from?.is_bot === true &&
+      msg.reply_to_message.from.username === botUsername;
+    const isMention = detectMention(msg, botUsername) || repliesToBot || msg.chat.type === 'private';
 
     const inbound: InboundMessage = {
       id: `tg-${msg.message_id}`,
@@ -563,20 +589,20 @@ function createAdapter(): ChannelAdapter | null {
    * rejects the markup, resend that chunk as plain text rather than failing.
    * Returns the first message's id.
    */
-  async function sendText(chatId: string, markdown: string): Promise<string | undefined> {
+  async function sendText(addr: TgAddress, markdown: string): Promise<string | undefined> {
     let first: string | undefined;
     for (const chunk of renderChunkPairs(markdown, 'telegram-html', TG_MAX_TEXT)) {
       let sent: { message_id: number };
       try {
         sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
-          chat_id: chatId,
+          ...addr,
           text: chunk.out,
           parse_mode: 'HTML',
         });
       } catch (err) {
         if (!(err instanceof TelegramApiError && /can't parse entities/i.test(err.description))) throw err;
         sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
-          chat_id: chatId,
+          ...addr,
           text: toPlain(chunk.md).slice(0, TG_MAX_TEXT),
         });
       }
@@ -634,7 +660,8 @@ function createAdapter(): ChannelAdapter | null {
     },
 
     async deliver(platformId, threadId, message: OutboundMessage): Promise<string | undefined> {
-      const chatId = platformId.startsWith('telegram:') ? platformId.slice('telegram:'.length) : platformId;
+      const addr = telegramAddress(platformId);
+      const chatId = addr.chat_id;
       const files = (message.files ?? []) as OutboundFile[];
       const op = parseOutbound(message);
 
@@ -669,11 +696,11 @@ function createAdapter(): ChannelAdapter | null {
         const keyboard = telegramKeyboard(op.questionId, op.options);
         if (!keyboard) {
           recordNumberedPrompt(op.questionId, 'telegram', platformId, threadId);
-          lastMessageId = await sendText(chatId, numberedChoicesText(op.title, op.question, op.options));
+          lastMessageId = await sendText(addr, numberedChoicesText(op.title, op.question, op.options));
         } else {
           const body = `<b>${escapeHtml(op.title)}</b>${op.question ? `\n${renderChunks(op.question, 'telegram-html', 3500)[0]}` : ''}`;
           const sent = await tgPost<{ message_id: number }>(token, 'sendMessage', {
-            chat_id: chatId,
+            ...addr,
             text: body,
             parse_mode: 'HTML',
             reply_markup: { inline_keyboard: keyboard },
@@ -681,7 +708,7 @@ function createAdapter(): ChannelAdapter | null {
           lastMessageId = String(sent.message_id);
         }
       } else if (op.op === 'text') {
-        lastMessageId = await sendText(chatId, op.text);
+        lastMessageId = await sendText(addr, op.text);
       }
 
       for (const f of files) {
@@ -689,7 +716,7 @@ function createAdapter(): ChannelAdapter | null {
         const sent = await tgPostMultipart<{ message_id: number }>(
           token,
           method,
-          { chat_id: chatId },
+          { ...addr },
           { field, filename: f.filename, data: f.data },
         );
         lastMessageId ??= String(sent.message_id);
@@ -698,9 +725,10 @@ function createAdapter(): ChannelAdapter | null {
     },
 
     async setTyping(platformId): Promise<void> {
-      const chatId = platformId.startsWith('telegram:') ? platformId.slice('telegram:'.length) : platformId;
+      const addr = telegramAddress(platformId);
+      const chatId = addr.chat_id;
       try {
-        await tgPost(token, 'sendChatAction', { chat_id: chatId, action: 'typing' });
+        await tgPost(token, 'sendChatAction', { ...addr, action: 'typing' });
       } catch (err) {
         // Typing indicators are nice-to-have — never fail the request over them.
         // Logged at INFO so silent API failures (rate limits, network blips) are visible.

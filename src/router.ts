@@ -26,6 +26,7 @@ import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
   createMessagingGroup,
+  createMessagingGroupAgent,
   getMessagingGroupAgents,
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
@@ -183,13 +184,19 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       denied_at: null,
       created_at: new Date().toISOString(),
     };
+    // A sub-conversation (e.g. a Telegram forum topic) of an already-wired
+    // chat inherits that chat's agents and sender policy.
+    const parentId = parentPlatformId(event.channelType, event.platformId);
+    const parent = parentId ? getMessagingGroupWithAgentCount(event.channelType, parentId) : undefined;
+    if (parent) mg.unknown_sender_policy = parent.mg.unknown_sender_policy;
     createMessagingGroup(mg);
     log.info('Auto-created messaging group', {
       id: mgId,
       channelType: event.channelType,
       platformId: event.platformId,
+      inheritedFrom: parent?.mg.id,
     });
-    agentCount = 0;
+    agentCount = parent ? inheritWirings(parent.mg.id, mgId) : 0;
   } else {
     mg = found.mg;
     agentCount = found.agentCount;
@@ -648,4 +655,24 @@ async function deliverToAgent(
 function messageIdForAgent(baseId: string | undefined, agentGroupId: string): string {
   const id = baseId && baseId.length > 0 ? baseId : generateId();
   return `${id}:${agentGroupId}`;
+}
+
+/** The chat a sub-conversation belongs to: `telegram:<chat>:<topic>` → `telegram:<chat>`. */
+export function parentPlatformId(channelType: string, platformId: string): string | null {
+  if (channelType !== 'telegram') return null;
+  const m = /^(telegram:-?\d+):\d+$/.exec(platformId);
+  return m ? m[1] : null;
+}
+
+function inheritWirings(fromMgId: string, toMgId: string): number {
+  const wirings = getMessagingGroupAgents(fromMgId);
+  for (const w of wirings) {
+    createMessagingGroupAgent({
+      ...w,
+      id: `mga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      messaging_group_id: toMgId,
+      created_at: new Date().toISOString(),
+    });
+  }
+  return wirings.length;
 }

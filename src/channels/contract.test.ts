@@ -233,7 +233,7 @@ async function slackHarness(): Promise<Harness> {
 
 // ── Telegram ──
 
-async function telegramHarness(): Promise<Harness> {
+async function telegramHarness(): Promise<Harness & { raw(message: Record<string, unknown>): Promise<void> }> {
   const calls: Call[] = [];
   const queue: unknown[] = [];
   let failNext = false;
@@ -314,6 +314,7 @@ async function telegramHarness(): Promise<Harness> {
         },
       }),
     unsigned: null,
+    raw: (message) => push({ message: { date: 1_700_000_000, from: { id: 1, first_name: 'Ana' }, ...message } }),
     isSend: (c) => c.api === 'sendMessage',
     textOf: (c) => String(c.body.text ?? ''),
     choiceIdsOf: (c) =>
@@ -746,6 +747,42 @@ describe('discord threads', () => {
     await h.inThread('501', 'and the budget?', '500');
     await until(() => h.setup.onInbound.mock.calls.length === 2);
     expect(h.setup.onInbound.mock.calls[1].slice(0, 2)).toEqual(['discord:C1', '500']);
+    await h.teardown();
+  });
+});
+
+describe('telegram topics and replies', () => {
+  it('treats each forum topic as its own conversation and replies inside it', async () => {
+    const h = await telegramHarness();
+    await h.raw({
+      message_id: 70,
+      chat: { id: -100, type: 'supergroup', title: 'Team' },
+      text: '@cb_bot plan the launch',
+      entities: [{ type: 'mention', offset: 0, length: 7 }],
+      is_topic_message: true,
+      message_thread_id: 5,
+    });
+    await until(() => h.setup.onInbound.mock.calls.length === 1);
+    expect(h.setup.onInbound.mock.calls[0][0]).toBe('telegram:-100:5');
+    await h.adapter.deliver('telegram:-100:5', null, { kind: 'chat', content: { text: 'On it' } });
+    expect(h.calls.filter((c) => h.isSend(c)).pop()?.body).toMatchObject({
+      chat_id: '-100',
+      message_thread_id: 5,
+      text: 'On it',
+    });
+    await h.teardown();
+  });
+
+  it('counts a reply to the bot as addressing it', async () => {
+    const h = await telegramHarness();
+    await h.raw({
+      message_id: 71,
+      chat: { id: -100, type: 'supergroup', title: 'Team' },
+      text: 'and the budget?',
+      reply_to_message: { from: { id: 999, is_bot: true, username: 'cb_bot' } },
+    });
+    await until(() => h.setup.onInbound.mock.calls.length === 1);
+    expect(h.setup.onInbound.mock.calls[0][2].isMention).toBe(true);
     await h.teardown();
   });
 });
