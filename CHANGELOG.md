@@ -11,8 +11,61 @@
 - Claude and Codex providers in one image, switchable per agent group or session with `/provider`.
 - Team memory: a shared bank per agent group that only takes facts approved through `propose_team_memory` or added with `/teamfact`, with host-stamped provenance tags.
 
+- **Every channel:**
+  - A shared capability model and renderer.
+  - Buttons on Telegram, WhatsApp and Discord.
+  - Numbered-reply cards on channels without buttons.
+  - Cross-channel identity (`/link`, `/notify-here`).
+  - An adapter contract suite for Slack, Telegram, WhatsApp, Discord and the Chat SDK bridge. See `docs/channels.md`.
+- **Slack:**
+  - Socket Mode, so no public URL is needed.
+  - The agent-session status line and stop button.
+  - A Home tab.
+  - Guests and Slack Connect users refused by default.
+- **WhatsApp:**
+  - Webhook signature checks.
+  - The 24-hour window, with `clawbridge-ai whatsapp-template`.
+  - STOP/START opt-outs.
+  - Reply buttons and lists.
+  - `clawbridge-ai tunnel`.
+- **Telegram and Discord:**
+  - Telegram forum topics; replying to the bot counts as addressing it.
+  - Discord threads and slash commands.
+- **Setup:**
+  - A guided, checked wizard per channel.
+  - `/connect` from chat.
+  - A one-minute onboarding conversation (`/onboard`).
+  - `npx github:…` builds itself.
+- **Chat controls:**
+  - `!stop`, `!mute`, `!fast`, `!deep`, `!shorter`, `!undo` and friends.
+  - `/help`, `/status`, `/tasks`, `/reply`, `/why`, `/usage`, `/budget`, `/permissions`, `/roles`, `/memory`, `/model`, `/digest`, `/voice` and `/skills`.
+- **Trust:**
+  - An append-only, hash-chained audit log (`clawbridge-ai audit`).
+  - Allow/ask/deny policies with risk badges and scoped "Always allow".
+  - Approver and auditor roles.
+  - A claim-receipt gate.
+  - An audience guard for DM-to-group posts.
+  - Friendly errors, with details sent to admins.
+- **Cost:** a usage ledger, monthly budgets with 50/75/90/100% alerts and a hold at the cap, an optional cost footer, and condition scripts required for frequent jobs.
+- **Capabilities:**
+  - An integration SDK (GitHub, Linear, Jira, Notion, HubSpot, Stripe, Shopify, Google, custom REST). Credentials stay on the host, writes need approval and are idempotent, and results carry evidence.
+  - `query_data` (DuckDB).
+  - `share_file` signed links.
+  - `browser_handoff`.
+  - Pinned skills with safety scans, plus `propose_skill`.
+  - Opt-in daily digests and voice replies.
+- **Security:**
+  - A host credential proxy (`CREDENTIAL_PROXY`).
+  - An egress gate (`EGRESS_PROXY`, `EGRESS_ALLOWLIST`).
+  - Network lockdown (`EGRESS_LOCKDOWN`).
+  - Read-only Codex credentials (`CODEX_AUTH_READONLY`).
+- **Evals:** 44 two-sided cases on both providers (pass^3), run on PRs and nightly.
+
 ### Changed
 - `@vectorize-io/hindsight-client` 0.5.4 → 1.2.0; the Hindsight server image is pinned to `1.2.0`.
+- Admin alerts go only to owners and admins (they used to post in every chat the bot knew).
+- `/help` answers instead of being silently dropped. `/status` reads like a status card.
+- WhatsApp setup defaults to the official Cloud API. The unofficial WhatsApp Web route is opt-in, behind a ban-risk warning.
 
 ## v3.0.0-codex.0 — 2026-05-14
 
