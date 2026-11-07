@@ -163,6 +163,7 @@ describe('Dual-provider (Claude + Codex) regression checks', () => {
         'setup/probe.sh',
         'container/agent-runner/src/providers/claude.ts', // Claude Code env tuning (CLAUDE_CODE_*)
         'src/credential-proxy.ts', // swaps container placeholders for the real credential
+        'src/friendly-errors.ts', // admin fix hint names the variable to update
       ].map((rel) => path.join(ROOT, rel)),
     );
     // The proxy forwards containers' own API calls upstream; nothing else may call the API.

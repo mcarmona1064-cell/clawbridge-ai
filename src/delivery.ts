@@ -29,6 +29,8 @@ import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typ
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 import { audit } from './audit.js';
+import { rewriteAgentError } from './friendly-errors.js';
+import { sendAdminAlert } from './shared/admin-alert.js';
 
 function extractText(jsonContent: string): string {
   try {
@@ -428,12 +430,23 @@ async function deliverMessage(
       ? readOutboxFiles(session.agent_group_id, session.id, msg.id, content.files as string[])
       : undefined;
 
+  // Agent errors: a plain-language message for the person, details for the admin.
+  let outboundContent = msg.content;
+  if (typeof content.agentError === 'string') {
+    const agentName = getAgentGroup(session.agent_group_id)?.name ?? 'Your agent';
+    const rewritten = rewriteAgentError(content, session.agent_group_id, agentName);
+    outboundContent = JSON.stringify(rewritten.content);
+    if (rewritten.alert) {
+      void sendAdminAlert(rewritten.alert).catch((err) => log.warn('Agent error alert failed', { err }));
+    }
+  }
+
   const platformMsgId = await deliveryAdapter.deliver(
     msg.channel_type,
     msg.platform_id,
     msg.thread_id,
     msg.kind,
-    msg.content,
+    outboundContent,
     files,
   );
   audit('message.posted', {

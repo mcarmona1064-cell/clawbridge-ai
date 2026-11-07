@@ -196,7 +196,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         platform_id: routing.platformId,
         channel_type: routing.channelType,
         thread_id: routing.threadId,
-        content: JSON.stringify({ text: `Error: ${errMsg}` }),
+        // The host turns `agentError` into a plain-language message for the
+        // person and an alert with the details for the admin.
+        content: JSON.stringify({ text: `Error: ${errMsg}`, agentError: errMsg.slice(0, 2000) }),
       });
     }
 
