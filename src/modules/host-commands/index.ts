@@ -90,6 +90,9 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         if (reply) write(reply);
         return;
       }
+      case '/connect':
+        write('Send /connect to the agent in a direct message on your chat app, or run `clawbridge-ai` in a terminal.');
+        return;
       case '/tasks': {
         const { tasksCommand } = await import('./help-tasks.js');
         write(tasksCommand(ctx.agentGroup.id, ctx.userId, ctx.args));

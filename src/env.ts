@@ -50,3 +50,35 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+/** The .env file the host reads (~/.clawbridge/.env unless only the integrations copy exists). */
+export function envFilePath(): string {
+  const candidates = [path.join(homedir(), '.clawbridge', '.env'), path.resolve(__dirname, '../../integrations/.env')];
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
+}
+
+/**
+ * Set KEY=VALUE lines in the .env file, replacing existing keys and
+ * appending new ones. The file stays readable only by its owner.
+ */
+export function setEnvValues(values: Record<string, string>, file = envFilePath()): void {
+  for (const k of Object.keys(values)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(k)) throw new Error(`invalid env key: ${k}`);
+    if (/[\r\n]/.test(values[k])) throw new Error(`invalid value for ${k}`);
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  let content = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+  for (const [key, value] of Object.entries(values)) {
+    const line = `${key}=${value}`;
+    const re = new RegExp(`^${key}=.*$`, 'm');
+    content = re.test(content)
+      ? content.replace(re, () => line)
+      : `${content}${content && !content.endsWith('\n') ? '\n' : ''}${line}\n`;
+  }
+  fs.writeFileSync(file, content, { mode: 0o600 });
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    /* best effort */
+  }
+}

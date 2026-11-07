@@ -50,13 +50,44 @@ export function getChannelContainerConfig(name: string): ChannelRegistration['co
  * Instantiate and set up all registered channel adapters.
  * Skips adapters that return null (missing credentials).
  */
+let savedSetupFn: ((adapter: ChannelAdapter) => ChannelSetup) | null = null;
+
+/**
+ * Start (or restart) one channel after its credentials were added at
+ * runtime, e.g. by /connect in chat. Returns true when it is running.
+ */
+export async function startChannelAdapter(name: string): Promise<boolean> {
+  const registration = registry.get(name);
+  if (!registration || !savedSetupFn) return false;
+  const existing = activeAdapters.get(name);
+  if (existing) {
+    await existing
+      .teardown()
+      .catch((err) => log.warn('Channel teardown before restart failed', { channel: name, err }));
+    activeAdapters.delete(name);
+  }
+  await startOne(name, registration, savedSetupFn);
+  return activeAdapters.has(name);
+}
+
 export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => ChannelSetup): Promise<void> {
+  savedSetupFn = setupFn;
   for (const [name, registration] of registry) {
+    await startOne(name, registration, setupFn);
+  }
+}
+
+async function startOne(
+  name: string,
+  registration: ChannelRegistration,
+  setupFn: (adapter: ChannelAdapter) => ChannelSetup,
+): Promise<void> {
+  {
     try {
       const adapter = await registration.factory();
       if (!adapter) {
         log.warn('Channel credentials missing, skipping', { channel: name });
-        continue;
+        return;
       }
 
       const setup = setupFn(adapter);

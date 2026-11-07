@@ -22,6 +22,7 @@ import { interceptNumberedReply, prepareOutbound } from './channels/channel-laye
 import { handleIdentityCommand, isIdentityCommand } from './modules/identity/index.js';
 import { stopChatSession } from './stop-session.js';
 import { handleChatControl, isChatControl, mutedUntil } from './chat-controls.js';
+import { handleConnect, isConnectMessage } from './modules/connect/index.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
 
@@ -119,6 +120,38 @@ async function main(): Promise<void> {
     return {
       onInbound(platformId, threadId, message) {
         const inboundContent = (message.content ?? {}) as { text?: unknown; senderId?: unknown; sender?: unknown };
+
+        // /connect <channel>: guided channel setup from chat. Tokens typed during
+        // the flow are handled here and never reach the agent or its memory.
+        if (
+          typeof inboundContent.text === 'string' &&
+          isConnectMessage({
+            channelType: adapter.channelType,
+            platformId,
+            text: inboundContent.text,
+            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+          })
+        ) {
+          void handleConnect({
+            channelType: adapter.channelType,
+            platformId,
+            text: inboundContent.text,
+            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            isGroup: message.isGroup === true,
+            agentName: process.env.ASSISTANT_NAME || 'ClawBridge AI',
+          })
+            .then((reply) =>
+              deliveryAdapter.deliver(
+                adapter.channelType,
+                platformId,
+                threadId,
+                'chat',
+                JSON.stringify({ text: reply }),
+              ),
+            )
+            .catch((err) => log.error('/connect failed', { err }));
+          return;
+        }
 
         // Account-linking commands work on any channel, before access checks:
         // a new account must be able to link itself to an existing one.
