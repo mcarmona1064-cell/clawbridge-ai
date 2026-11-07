@@ -21,6 +21,7 @@ import { routeInbound } from './router.js';
 import { interceptNumberedReply, prepareOutbound } from './channels/channel-layer.js';
 import { handleIdentityCommand, isIdentityCommand } from './modules/identity/index.js';
 import { stopChatSession } from './stop-session.js';
+import { handleChatControl, isChatControl, mutedUntil } from './chat-controls.js';
 import { log } from './log.js';
 import { initMemoryDb, MemoryManager } from './memory/index.js';
 
@@ -164,6 +165,35 @@ async function main(): Promise<void> {
           }).catch((err) => log.error('Failed to handle numbered reply', { questionId: answer.questionId, err }));
           return;
         }
+        // !stop / !mute / !unmute work while the agent is busy, on every channel.
+        if (typeof inboundContent.text === 'string' && isChatControl(inboundContent.text)) {
+          void handleChatControl({
+            channelType: adapter.channelType,
+            platformId,
+            threadId,
+            text: inboundContent.text,
+            senderId: typeof inboundContent.senderId === 'string' ? inboundContent.senderId : null,
+            isGroup: message.isGroup === true,
+          })
+            .then((reply) =>
+              reply
+                ? deliveryAdapter.deliver(
+                    adapter.channelType,
+                    platformId,
+                    threadId,
+                    'chat',
+                    JSON.stringify({ text: reply }),
+                  )
+                : undefined,
+            )
+            .catch((err) => log.error('Chat control failed', { err }));
+          return;
+        }
+        if (mutedUntil(adapter.channelType, platformId)) {
+          log.debug('Message dropped — chat is muted', { channelType: adapter.channelType, platformId });
+          return;
+        }
+
         routeInbound({
           channelType: adapter.channelType,
           platformId,

@@ -14,7 +14,14 @@ const { gateCommand } = await import('./command-gate.js');
 describe('gateCommand', () => {
   it('filters host-only slash commands by exact first token', () => {
     expect(gateCommand(JSON.stringify({ text: '/start' }), 'telegram:1', 'ag-1')).toEqual({ action: 'filter' });
-    expect(gateCommand(JSON.stringify({ text: '/help please' }), 'telegram:1', 'ag-1')).toEqual({ action: 'filter' });
+    expect(gateCommand(JSON.stringify({ text: '/login please' }), 'telegram:1', 'ag-1')).toEqual({ action: 'filter' });
+  });
+
+  it('answers /help on the host for everyone', () => {
+    expect(gateCommand(JSON.stringify({ text: '/help' }), 'telegram:1', 'ag-1')).toEqual({
+      action: 'handle',
+      command: '/help',
+    });
   });
 
   it('does not treat command prefixes as known commands', () => {

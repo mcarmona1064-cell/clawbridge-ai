@@ -8,7 +8,7 @@ export interface SlashCommandDefinition {
 }
 
 const DEFINITIONS: SlashCommandDefinition[] = [
-  { command: '/help', category: 'filtered' },
+  { command: '/help', category: 'host', adminOnly: false, description: 'How to work with me, in plain words' },
   { command: '/login', category: 'filtered' },
   { command: '/logout', category: 'filtered' },
   { command: '/doctor', category: 'filtered' },
@@ -51,6 +51,12 @@ const DEFINITIONS: SlashCommandDefinition[] = [
     category: 'host',
     adminOnly: true,
     description: 'Show or switch the AI provider (/provider claude|codex [session] or /provider default)',
+  },
+  {
+    command: '/tasks',
+    category: 'host',
+    adminOnly: false,
+    description: 'List scheduled jobs (/tasks cancel <id> for admins)',
   },
   {
     command: '/link',

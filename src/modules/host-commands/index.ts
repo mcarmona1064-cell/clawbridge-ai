@@ -66,6 +66,17 @@ export async function handleHostCommand(ctx: HostCommandContext, write: WriteRes
         return handleProvider(ctx, write);
       case '/teamfact':
         return await handleTeamFact(ctx, write);
+      case '/help': {
+        const { helpText } = await import('./help-tasks.js');
+        const { hasAdminPrivilege } = await import('../permissions/db/user-roles.js');
+        write(helpText(ctx.event.channelType, !!ctx.userId && hasAdminPrivilege(ctx.userId, ctx.agentGroup.id)));
+        return;
+      }
+      case '/tasks': {
+        const { tasksCommand } = await import('./help-tasks.js');
+        write(tasksCommand(ctx.agentGroup.id, ctx.userId, ctx.args));
+        return;
+      }
       case '/link':
       case '/unlink':
       case '/accounts':
